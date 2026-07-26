@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  typecheck:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,5 +14,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: tsc --noEmit
-        run: npx tsc --noEmit
+      - name: typecheck
+        run: npm run typecheck
+      - name: smoke test
+        run: npm run smoke

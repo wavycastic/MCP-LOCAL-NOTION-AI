@@ -53,10 +53,11 @@ export function detectToolchain(root: string): Toolchain {
 	}
 	if (existsSync(join(root, "package.json"))) {
 		const s = npmScripts(root)
+		// --silent phai dung TRUOC ten script, khong thi npm truyen no cho script.
 		return {
 			kind: "npm",
-			build: s.has("build") ? ["npm", "run", "build", "--silent"] : undefined,
-			test: s.has("test") ? ["npm", "test", "--silent"] : undefined,
+			build: s.has("build") ? ["npm", "run", "--silent", "build"] : undefined,
+			test: s.has("test") ? ["npm", "run", "--silent", "test"] : undefined,
 		}
 	}
 	if (existsSync(join(root, "pyproject.toml")) || existsSync(join(root, "tox.ini"))) {

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 import { withLock } from "../lock.js"
 import { audit } from "../log.js"
+import { resolveRepo } from "../repos.js"
 import { createFile, createFileSchema } from "./createFile.js"
 import { editFile, editFileSchema } from "./editFile.js"
 import { gitBlame, gitBlameSchema } from "./gitBlame.js"
@@ -26,6 +27,19 @@ type Opts = {
 	readOnly?: boolean
 	/** Tool xoa du lieu: annotation destructiveHint. */
 	destructive?: boolean
+}
+
+/**
+ * Khoa lock phai la repo DA RESOLVE, khong phai args.repo tho: neu chi co 1 repo
+ * thi goi co `repo` va goi bo trong `repo` tro cung mot repo — dung args tho se
+ * tao 2 lane khac nhau va mat tac dung serialize.
+ */
+function lockKey(args: any): string {
+	try {
+		return resolveRepo(args?.repo).root
+	} catch {
+		return "<unresolved>" // handler se throw ngay sau day voi message ro rang
+	}
 }
 
 function reg(
@@ -54,9 +68,7 @@ function reg(
 			const exec = async () => fn(args ?? {})
 			try {
 				// Tool co side effect duoc serialize theo tung repo de tranh race.
-				const out = readOnly
-					? await exec()
-					: await withLock(args?.repo ?? "<default>", name, exec)
+				const out = readOnly ? await exec() : await withLock(lockKey(args), name, exec)
 				audit(name, args, true)
 				return {
 					content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
