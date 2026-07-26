@@ -82,6 +82,30 @@ function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["sour
 	}
 }
 
+/**
+ * Ten repo la DINH DANH duy nhat ma agent dung de tro tro toi repo. Neu hai repo
+ * khac duong dan ma cung ten thi `resolveRepo` se luon tra ve cai dau tien —
+ * agent tuong dang ghi vao repo A trong khi thuc te ghi vao repo B, va khong co
+ * dau hieu gi. Chet im lang nhu vay te hon la sap ngay, nen: sap ngay.
+ */
+function assertUniqueNames(repos: Repo[]): void {
+	const byName = new Map<string, string[]>()
+	for (const r of repos) {
+		const k = r.name.toLowerCase()
+		byName.set(k, [...(byName.get(k) ?? []), r.root])
+	}
+	const dups = [...byName.entries()].filter(([, roots]) => roots.length > 1)
+	if (dups.length === 0) return
+
+	const detail = dups
+		.map(([name, roots]) => `"${name}": ${roots.join(" | ")}`)
+		.join("; ")
+	throw new RepoError(
+		`co ${dups.length} ten repo bi trung — ${detail}. ` +
+			`Dat "name" khac cho chung trong ${REPOS_CONFIG}, hoac bo mot trong hai khoi WORKSPACE_ROOT`,
+	)
+}
+
 /** Repo khai bao trong repos.json + repo tim thay trong WORKSPACE_ROOT. Config thang. */
 export function allRepos(): Repo[] {
 	if (cache && Date.now() - cache.at < CACHE_MS) return cache.repos
@@ -108,6 +132,7 @@ export function allRepos(): Repo[] {
 	}
 
 	const repos = [...byRoot.values()].sort((a, b) => a.name.localeCompare(b.name))
+	assertUniqueNames(repos) // truoc khi cache: cau hinh sai thi khong duoc "dinh" lai
 	cache = { at: Date.now(), repos }
 	return repos
 }

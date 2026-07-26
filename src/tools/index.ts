@@ -10,7 +10,9 @@ import { gitCommit, gitCommitSchema } from "./gitCommit.js"
 import { gitDiff, gitDiffSchema } from "./gitDiff.js"
 import { gitLog, gitLogSchema } from "./gitLog.js"
 import { gitPush, gitPushSchema } from "./gitPush.js"
+import { gitRestore, gitRestoreSchema } from "./gitRestore.js"
 import { gitStatus, gitStatusSchema } from "./gitStatus.js"
+import { jobStatus, jobStatusSchema } from "./jobStatus.js"
 import { listDir, listDirSchema } from "./listDir.js"
 import { listRepos } from "./listRepos.js"
 import { moveFile, moveFileSchema } from "./moveFile.js"
@@ -93,24 +95,26 @@ export function registerAll(s: McpServer) {
 	// —— Doc ——
 	reg(s, "read_file", "Doc file trong mot repo, phan trang theo dong. Dung cho moi file khong nam trong code graph (markup, project file, CI yaml, config).", readFileSchema, readFile, { readOnly: true })
 	reg(s, "list_dir", "Liet ke file/thu muc trong repo. Bo qua .git, node_modules, bin, obj, dist, target, .venv.", listDirSchema, listDir, { readOnly: true })
-	reg(s, "ripgrep", "Tim regex trong mot repo bang ripgrep. Dung khi can khop chuoi/pattern chinh xac. Cau hoi kien truc thi dung code graph (GitNexus) neu repo do co index.", ripgrepSchema, ripgrep, { readOnly: true })
+	reg(s, "ripgrep", "Tim regex trong mot repo, hoac trong TAT CA repo voi all_repos=true. Dung all_repos truoc khi doi/xoa symbol dung chung. Tu lui ve git grep neu may chua cai ripgrep.", ripgrepSchema, ripgrep, { readOnly: true })
 
 	// —— Sua file (chi repo co write: true) ——
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace. old_str phai khop chinh xac va duy nhat. Chi tren repo co quyen ghi va dang o branch dung prefix.", editFileSchema, editFile)
 	reg(s, "create_file", "Tao file MOI voi noi dung day du. Bao loi neu file da ton tai (sua file cu thi dung edit_file). Dung khi tach class/module ra file rieng.", createFileSchema, createFile)
 	reg(s, "move_file", "Doi ten / di chuyen file bang git mv, giu history va blame. Khong di chuyen cheo repo.", moveFileSchema, moveFile)
 	reg(s, "remove_file", "Xoa file da track bang git rm. Chi dung khi da chac khong con reference nao (kiem tra bang code graph hoac ripgrep truoc).", removeFileSchema, removeFile, { destructive: true })
+	reg(s, "git_restore", "Duong lui: tra tung FILE cu the ve trang thai da commit (HEAD), bo thay doi chua commit cua chinh no. Dung khi sua sai. Chi nhan duong dan file cu the, khong nhan \".\" hay wildcard.", gitRestoreSchema, gitRestore, { destructive: true })
 
 	// —— Verify ——
-	reg(s, "run_build", "Chay lenh build cua repo (khai bao trong repos.json, hoac doan tu toolchain). Khong nhan argv tuy y.", runBuildSchema, runBuild)
-	reg(s, "run_tests", "Chay lenh test cua repo. Tuy chon filter (chi toolchain dotnet).", runTestsSchema, runTests)
+	reg(s, "run_build", "Chay lenh build cua repo (khai bao trong repos.json, hoac doan tu toolchain). Khong nhan argv tuy y. Repo lon nen dat background=true roi hoi bang job_status.", runBuildSchema, runBuild)
+	reg(s, "run_tests", "Chay lenh test cua repo. Tuy chon filter (chi toolchain dotnet). Repo lon nen dat background=true roi hoi bang job_status.", runTestsSchema, runTests)
+	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests tao ra voi background=true. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
 
 	// —— Git ——
 	reg(s, "git_status", "git status --porcelain + branch hien tai + repo nay co dang ghi duoc khong.", gitStatusSchema, gitStatus, { readOnly: true })
 	reg(s, "git_diff", "Xem diff working tree hoac staged, tuy chon gioi han theo path hoac chi --stat.", gitDiffSchema, gitDiff, { readOnly: true })
 	reg(s, "git_log", "Lich su commit gan day, tuy chon gioi han theo path va kem --stat.", gitLogSchema, gitLog, { readOnly: true })
 	reg(s, "git_blame", "git blame 1 file, tuy chon gioi han theo khoang dong. Dung de biet ai/commit nao doi dong code.", gitBlameSchema, gitBlame, { readOnly: true })
-	reg(s, "git_commit", "git add -A roi commit trong mot repo. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
+	reg(s, "git_commit", "git add -A roi commit trong mot repo. Tu choi commit neu co file thuoc deny-list (.env, key, secrets/) dang cho. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
 	reg(s, "git_push", "Push branch hien tai len remote (--set-upstream, khong bao gio --force). Yeu cau working tree sach va ALLOW_PUSH=true.", gitPushSchema, gitPush)
 
 	// —— Code graph ——

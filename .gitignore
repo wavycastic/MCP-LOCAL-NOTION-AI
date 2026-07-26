@@ -2,4 +2,7 @@ node_modules/
 dist/
 .env
 audit.log
+audit.log.1
+
+# Chua duong dan tren may ban — moi nguoi mot ban khac nhau.
 repos.json

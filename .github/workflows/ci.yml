@@ -13,8 +13,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+
+      # npm ci khi da co lockfile (cai dat tai lap duoc), npm install khi chua.
+      # Chay `npm install` mot lan tren may roi commit package-lock.json de CI
+      # khong con phu thuoc vao phien ban duoc resolve o thoi diem chay.
+      - name: install
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "::warning::chua co package-lock.json — dependency khong tai lap duoc"
+            npm install
+          fi
+
       - name: typecheck
         run: npm run typecheck
+
       - name: smoke test
         run: npm run smoke

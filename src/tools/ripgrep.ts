@@ -1,29 +1,99 @@
 import { z } from "zod"
 import { run } from "../exec.js"
-import { resolveRepo } from "../repos.js"
+import { allRepos, resolveRepo, type Repo } from "../repos.js"
 
 export const ripgrepSchema = {
-	repo: z.string().optional().describe("Ten repo (xem list_repos)"),
+	repo: z.string().optional().describe("Ten repo (xem list_repos). Bo qua khi all_repos=true"),
+	all_repos: z
+		.boolean()
+		.optional()
+		.describe(
+			'Tim trong TAT CA repo dang phuc vu. Dung cho cau hoi "con cho nao con dung X" truoc khi doi/xoa mot symbol',
+		),
 	pattern: z.string(),
 	glob: z.string().optional().describe("vd: *.cs, *.axaml, *.ts"),
 	ignore_case: z.boolean().optional(),
 	max_count: z.number().int().min(1).max(500).optional(),
 }
 
-export async function ripgrep(a: {
+type Args = {
 	repo?: string
+	all_repos?: boolean
 	pattern: string
 	glob?: string
 	ignore_case?: boolean
 	max_count?: number
-}) {
-	const repo = resolveRepo(a.repo)
-	const argv = ["rg", "--line-number", "--no-heading", "--color", "never"]
-	if (a.ignore_case) argv.push("-i")
-	if (a.glob) argv.push("--glob", a.glob)
-	argv.push("--max-count", String(a.max_count ?? 100))
-	argv.push("--regexp", a.pattern) // --regexp: pattern khong bi hieu thanh flag
-	argv.push(".")
-	const r = await run(argv, { cwd: repo.root, timeoutMs: 60_000 })
-	return { repo: repo.name, matches: r.stdout, exit_code: r.code }
+}
+
+const MAX_REPOS = 20
+const MAX_CHARS_PER_REPO = 40_000
+
+type Hit = {
+	repo: string
+	engine: "ripgrep" | "git-grep"
+	matches: string
+	truncated: boolean
+	note?: string
+}
+
+function hit(repo: Repo, engine: Hit["engine"], stdout: string, note?: string): Hit {
+	return {
+		repo: repo.name,
+		engine,
+		matches: stdout.slice(0, MAX_CHARS_PER_REPO),
+		truncated: stdout.length > MAX_CHARS_PER_REPO,
+		...(note ? { note } : {}),
+	}
+}
+
+/**
+ * rg khong co san tren moi may. Truoc day loi hien ra la "ENOENT" tran trui va
+ * agent khong biet lam gi; gio lui ve `git grep` (chi tim file da track) va noi
+ * ro trong ket qua.
+ */
+async function grepOne(repo: Repo, a: Args): Promise<Hit> {
+	const rg = ["rg", "--line-number", "--no-heading", "--color", "never"]
+	if (a.ignore_case) rg.push("-i")
+	if (a.glob) rg.push("--glob", a.glob)
+	rg.push("--max-count", String(a.max_count ?? 100))
+	rg.push("--regexp", a.pattern) // --regexp: pattern khong bi hieu thanh flag
+	rg.push(".")
+
+	try {
+		const r = await run(rg, { cwd: repo.root, timeoutMs: 60_000 })
+		return hit(repo, "ripgrep", r.stdout)
+	} catch (e) {
+		const msg = e instanceof Error ? e.message : String(e)
+		if (!msg.includes("ENOENT")) throw e
+
+		const gg = ["git", "grep", "--line-number", "--no-color"]
+		if (a.ignore_case) gg.push("-i")
+		gg.push("-e", a.pattern)
+		if (a.glob) gg.push("--", a.glob)
+		const r = await run(gg, { cwd: repo.root, timeoutMs: 60_000 })
+		return hit(
+			repo,
+			"git-grep",
+			r.stdout,
+			"chua cai ripgrep nen dung git grep: chi tim trong file da track",
+		)
+	}
+}
+
+export async function ripgrep(a: Args) {
+	const targets = a.all_repos ? allRepos() : [resolveRepo(a.repo)]
+	const searched = targets.slice(0, MAX_REPOS)
+
+	// Tuan tu: 20 tien trinh rg cung luc lam treo may nhieu hon la tiet kiem thoi gian.
+	const results: Hit[] = []
+	for (const repo of searched) results.push(await grepOne(repo, a))
+
+	return {
+		repos_searched: searched.map((r) => r.name),
+		...(targets.length > searched.length
+			? { skipped_repos: targets.slice(MAX_REPOS).map((r) => r.name) }
+			: {}),
+		results: results.filter((r) => a.all_repos === true ? r.matches.trim().length > 0 : true),
+		...(a.all_repos ? { note: "chi liet ke repo co ket qua" } : {}),
+	}
 }
