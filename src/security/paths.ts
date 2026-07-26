@@ -13,6 +13,17 @@ const DENY: RegExp[] = [
 export class PathDenied extends Error {}
 
 /**
+ * Kiem tra mot path tuong doi co roi vao deny-list khong.
+ *
+ * Tach ra rieng vi khong phai luc nao cung co path de resolve: git_commit can
+ * loc danh sach ten file da stage do git in ra.
+ */
+export function isDeniedRelPath(rel: string): boolean {
+	const norm = rel.split(sep).join("/")
+	return DENY.some((p) => p.test(norm))
+}
+
+/**
  * Core: resolve `rel` vao trong `root` (root cua MOT repo), chan symlink escape
  * va deny-list. Hoat dong ca khi path chua ton tai: realpath ancestor gan nhat
  * roi ghep lai phan duoi.
@@ -44,10 +55,7 @@ function resolveInRoot(root: string, rel: string): string {
 	if (r === "" || r.startsWith("..") || isAbsolute(r))
 		throw new PathDenied("path escapes repo root")
 
-	const norm = r.split(sep).join("/")
-	for (const p of DENY) {
-		if (p.test(norm)) throw new PathDenied(`denied path: ${norm}`)
-	}
+	if (isDeniedRelPath(r)) throw new PathDenied(`denied path: ${r}`)
 	return real
 }
 

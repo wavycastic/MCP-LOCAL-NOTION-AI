@@ -12,10 +12,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const GIT_ID = ["-c", "user.email=smoke@example.com", "-c", "user.name=smoke"]
-
 function git(cwd: string, ...args: string[]) {
-	execFileSync("git", [...GIT_ID, ...args], { cwd, stdio: "pipe" })
+	execFileSync("git", args, { cwd, stdio: "pipe" })
 }
 
 const workspace = mkdtempSync(join(tmpdir(), "local-repo-mcp-smoke-"))
@@ -24,6 +22,11 @@ function makeRepo(name: string): string {
 	const root = join(workspace, name)
 	mkdirSync(root, { recursive: true })
 	git(root, "init", "-b", "main")
+	// Ghi identity vao .git/config cua repo tam, KHONG dung `git -c`: cac tool goi
+	// `git commit` qua exec.ts, ma exec.ts loc env va CI khong co gitconfig global
+	// — khong co dong nay thi git commit fail voi "Author identity unknown".
+	git(root, "config", "user.email", "smoke@example.com")
+	git(root, "config", "user.name", "smoke")
 	writeFileSync(join(root, "README.md"), "hello\nworld\n")
 	writeFileSync(
 		join(root, "package.json"),
@@ -39,7 +42,7 @@ function makeRepo(name: string): string {
 }
 
 const rw = makeRepo("demo") // khai bao trong repos.json, write: true
-const ro = makeRepo("refonly") // chi duoc tim thay qua WORKSPACE_ROOT → chi doc
+makeRepo("refonly") // chi duoc tim thay qua WORKSPACE_ROOT → chi doc
 writeFileSync(join(rw, ".env"), "SECRET=x\n") // phai bi deny-list chan
 
 const reposConfig = join(workspace, "repos.json")
@@ -186,8 +189,21 @@ const s1 = await gitStatus({ repo: "demo" })
 ok("git_status thay dirty", s1.dirty === true)
 ok("git_status bao writable", s1.writable === true)
 
+// `git add -A` se stage ca .env — phai bi chan, khong duoc de secret ra remote.
+await denies(
+	"git_commit chan file trong deny-list",
+	() => gitCommit({ repo: "demo", message: "smoke: add a.ts" }),
+	"deny-list",
+)
+writeFileSync(join(rw, ".gitignore"), ".env\n")
+
 const cm = await gitCommit({ repo: "demo", message: "smoke: add a.ts" })
 ok("git_commit tra sha", cm.sha.length > 0 && cm.exit_code === 0, JSON.stringify(cm))
+const tracked = execFileSync("git", ["ls-files"], { cwd: rw, encoding: "utf8" })
+	.split("\n")
+	.map((l) => l.trim())
+ok("src/a.ts da vao commit", tracked.includes("src/a.ts"))
+ok(".env KHONG bi commit", !tracked.includes(".env"), tracked.join(" "))
 ok("tree sach sau commit", (await gitStatus({ repo: "demo" })).dirty === false)
 
 const rm = await removeFile({ repo: "demo", path: "src/a.ts" })
