@@ -1,39 +1,69 @@
-# AGENTS.md — lam viec tren chinh repo cvaut-local-mcp
+# AGENTS.md — lam viec tren chinh repo local-repo-mcp
 
-File nay danh cho agent/ban sua **server MCP nay**, khong phai repo CV-AUT.
-Instructions cho agent lam viec tren CV-AUT nam trong `README.md`.
+File nay danh cho agent/ban sua **server MCP nay**. Instructions cho agent lam viec tren cac repo
+duoc mount nam trong `README.md`.
+
+## Kien truc
+
+```
+src/config.ts          env, khong chua logic
+src/repos.ts           REPO REGISTRY — nguon su that ve repo nao ton tai va quyen gi
+src/toolchain.ts       doan build/test cmd tu file dac trung o root repo
+src/security/paths.ts  chroot theo TUNG repo + deny-list
+src/exec.ts            spawn khong shell, cwd bat buoc
+src/git.ts             hai cua kiem tra truoc khi ghi
+src/lock.ts            mutex theo tung repo
+src/tools/*.ts         moi tool: schema zod + handler
+src/tools/index.ts     registry: annotations, lock, audit, isError
+```
+
+Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo mac dinh" —
+`resolveRepo` tu xu ly truong hop chi co 1 repo.
 
 ## Nguyen tac khong duoc pha
 
-1. **Moi path tu ben ngoai phai di qua `src/security/paths.ts`.** Khong `readFileSync`/`writeFileSync`
-   truc tiep tren string do client gui. `safeResolve` cho path phai ton tai, `safeResolveNew` cho path
-   se duoc tao, `safeResolveDir` cho thu muc (cho phep repo root).
-2. **Khong bao gio `shell: true`.** Moi lenh chay qua `run(argv)` trong `src/exec.ts` voi argv da co dinh.
-3. **Khong tool nao nhan argv/flag tuy y.** Muon them tham so thi validate bang zod hep (xem
-   `runTestsSchema` — filter co regex allowlist).
-4. **Moi tool co ghi phai goi `assertWritableBranch()` o dong dau.** Khong co ngoai le.
-5. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, hay `git push --force`.**
-   Chieu B: local la nguon su that, cac lenh nay xoa dung thu agent vua viet.
-6. **Khong co `write_file` ghi de ca file.** `create_file` chi tao file moi, `edit_file` chi
+1. **Moi path tu client phai di qua `src/security/paths.ts`, kem root cua dung repo do.**
+   `safeResolve(repo.root, rel)` cho path phai ton tai, `safeResolveNew` cho path se duoc tao,
+   `safeResolveDir` cho thu muc (cho phep repo root). Khong bao gio truyen `WORKSPACE_ROOT` lam root —
+   lam vay la mo duong cho `../` di cheo giua cac repo.
+2. **Khong bao gio `shell: true`.** Moi lenh chay qua `run(argv, { cwd })` voi argv co dinh.
+3. **Khong tool nao nhan argv/flag tuy y**, ke ca tu `repos.json`: `build`/`test`/`reindex` phai la
+   mang argv va duoc validate trong `repos.ts`.
+4. **Moi tool co ghi phai goi `assertWritableBranch(repo)` o dong dau.** Ham do kiem tra ca
+   `repo.write` va branch prefix. Khong co ngoai le.
+5. **Repo mac dinh la chi-doc.** Repo tu dong tim thay chi ghi duoc khi `AUTO_DISCOVERED_WRITE=true`;
+   repo trong `repos.json` chi ghi duoc khi `"write": true`. Dung doi mac dinh nay.
+6. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, `git push --force`.**
+   Local la nguon su that; cac lenh nay xoa dung thu agent vua viet.
+7. **Khong co `write_file` ghi de ca file.** `create_file` chi tao file moi, `edit_file` chi
    string-replace. Day la thiet ke, khong phai thieu sot.
 
 ## Them mot tool moi
 
-1. Tao `src/tools/<name>.ts`: export `<name>Schema` (object cac zod field) + ham handler.
-2. Handler nhan 1 object args da validate, tra ve plain object JSON-serializable.
-3. Dang ky trong `src/tools/index.ts` bang `reg(...)`:
-   - `{ readOnly: true }` cho tool chi doc — se **khong** bi serialize qua mutex.
-   - bo `readOnly` cho tool co side effect — se chay trong `withLock`.
+1. Tao `src/tools/<name>.ts`: export `<name>Schema` + handler.
+2. Schema **luon co** `repo: z.string().optional().describe("Ten repo (xem list_repos)")`.
+3. Handler: `const repo = resolveRepo(a.repo)` truoc tien; neu co ghi thi
+   `await assertWritableBranch(repo)` ngay sau. Tra ve plain object, **luon kem `repo: repo.name`**
+   de agent khong lam lan ket qua giua cac repo.
+4. Dang ky trong `src/tools/index.ts` bang `reg(...)`:
+   - `{ readOnly: true }` cho tool chi doc — khong bi serialize qua mutex.
+   - bo `readOnly` cho tool co side effect — chay trong `withLock(repo, ...)`.
    - `{ destructive: true }` cho tool xoa du lieu.
-4. Description la giao dien that voi agent. Viet ro **khi nao dung** va **khi nao dung tool khac**
-   (vd: ripgrep vs GitNexus query). Description kem lam agent dung sai tool, khong phai loi code.
+5. Description la giao dien that voi agent. Viet ro **khi nao dung** va **khi nao dung tool khac**.
+   Description kem lam agent dung sai tool, khong phai loi code.
+
+## Ho tro mot toolchain moi
+
+Them nhanh vao `detectToolchain` trong `src/toolchain.ts`. Chi tra ve argv co dinh, va chi khi
+tin cay: neu doan sai thi tot hon la tra `undefined` de `run_build` bao loi ro rang
+("khai bao build trong repos.json") thay vi chay mot lenh vo nghia.
 
 ## Loi va log
 
-- Handler cu viec `throw new Error("...")`. Registry bat, ghi `audit.log`, va tra ve `isError: true`
-  kem message de agent tu sua — khong lam vo transport.
-- Message loi nen noi ro **buoc tiep theo** (vd: "old_str khop 3 cho... mo rong old_str hoac dat
-  replace_all=true"), vi agent doc message do de retry.
+- Handler cu viec `throw new Error("...")`. Registry bat, ghi `audit.log`, tra `isError: true` kem
+  message — khong lam vo transport.
+- Message loi phai noi ro **buoc tiep theo**, vi agent doc message do de retry. Vd:
+  "khong biet repo X. Dang co: A, B, C" hoac "repo Y la chi-doc. Dat write: true trong repos.json".
 - `audit.log` la ban ghi duy nhat ve viec agent da lam gi. Khong bao gio tat.
 
 ## Truoc khi commit
