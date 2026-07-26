@@ -3,6 +3,7 @@ import { run } from "../exec.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolveNew } from "../security/paths.js"
+import { forgetTouched } from "../touched.js"
 
 export const gitRestoreSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
@@ -54,6 +55,9 @@ export async function gitRestore(a: { repo?: string; paths: string[] }) {
 	})
 	if (r.code !== 0)
 		throw new Error(`git checkout that bai: ${r.stderr.trim() || r.stdout.trim()}`)
+
+	// Da hoan tac thi khong con la thay doi cho commit nua.
+	forgetTouched(repo.root, ...a.paths)
 
 	return {
 		repo: repo.name,

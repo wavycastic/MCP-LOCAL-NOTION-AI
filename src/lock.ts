@@ -5,8 +5,9 @@
  * Ly do: agent goi tool song song rat de gay race — vd edit_file trong khi
  * run_build dang doc file, hoac hai git_commit chong len nhau.
  */
+import { LOCK_WAIT_MS } from "./config.js"
 
-type Lane = { tail: Promise<unknown>; holder: string | null; queued: number }
+type Lane = { tail: Promise<void>; holder: string | null; queued: number }
 
 const lanes = new Map<string, Lane>()
 
@@ -25,26 +26,59 @@ export function lockState() {
 		.map(([repo, l]) => ({ repo, holder: l.holder, queued: l.queued }))
 }
 
-export function withLock<T>(
+/** `p` khong bao gio reject. Reject o day chi co nghia la het thoi gian cho. */
+function waitFor(p: Promise<void>, ms: number): Promise<void> {
+	if (!Number.isFinite(ms) || ms <= 0) return p // 0 = cho vo han (job background)
+	return new Promise((res, rej) => {
+		const t = setTimeout(() => rej(new Error("lock-timeout")), ms)
+		p.then(
+			() => {
+				clearTimeout(t)
+				res()
+			},
+			() => {
+				clearTimeout(t)
+				res()
+			},
+		)
+	})
+}
+
+export async function withLock<T>(
 	repoKey: string,
 	name: string,
 	fn: () => Promise<T>,
+	waitMs: number = LOCK_WAIT_MS,
 ): Promise<T> {
 	const l = lane(repoKey)
-	l.queued++
-	const result = l.tail.then(async () => {
-		l.queued--
-		l.holder = name
-		try {
-			return await fn()
-		} finally {
-			l.holder = null
-		}
+
+	const prev = l.tail
+	let release!: () => void
+	l.tail = new Promise<void>((res) => {
+		release = res
 	})
-	// Giu chuoi khong bi vo khi 1 tool throw.
-	l.tail = result.then(
-		() => undefined,
-		() => undefined,
-	)
-	return result
+	l.queued++
+
+	try {
+		await waitFor(prev, waitMs)
+	} catch {
+		// Het gio cho: KHONG chiem lane. Phai mo cho nguoi sau dung luc prev xong,
+		// khong duoc release ngay — lam vay la pha thu tu tuan tu cua ca lane.
+		void prev.then(release, release)
+		l.queued--
+		const busy = l.holder ? `dang chay "${l.holder}"` : "dang co viec khac chay"
+		throw new Error(
+			`het thoi gian cho repo ranh (${Math.round(waitMs / 1000)}s): repo ${busy}. ` +
+				`Neu do la build/test dai, dat background=true va theo doi bang job_status`,
+		)
+	}
+
+	l.queued--
+	l.holder = name
+	try {
+		return await fn()
+	} finally {
+		l.holder = null
+		release()
+	}
 }

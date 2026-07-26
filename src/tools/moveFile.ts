@@ -5,6 +5,7 @@ import { run } from "../exec.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve, safeResolveNew } from "../security/paths.js"
+import { noteTouched } from "../touched.js"
 
 export const moveFileSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
@@ -27,5 +28,6 @@ export async function moveFile(a: { repo?: string; from: string; to: string }) {
 	})
 	if (r.code !== 0)
 		throw new Error(`git mv that bai: ${r.stderr.trim() || r.stdout.trim()}`)
+	noteTouched(repo.root, a.from, a.to) // ca hai dau: xoa cho cu, them cho moi
 	return { repo: repo.name, branch, from: a.from, to: a.to, exit_code: r.code }
 }

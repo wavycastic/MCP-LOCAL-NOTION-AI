@@ -5,6 +5,7 @@ import { MAX_WRITE_BYTES } from "../config.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolveNew } from "../security/paths.js"
+import { noteTouched } from "../touched.js"
 
 export const createFileSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
@@ -32,5 +33,6 @@ export async function createFile(a: { repo?: string; path: string; content: stri
 
 	mkdirSync(dirname(abs), { recursive: true })
 	writeFileSync(abs, a.content, "utf8")
+	noteTouched(repo.root, a.path)
 	return { repo: repo.name, branch, path: a.path, bytes, created: true }
 }

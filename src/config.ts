@@ -45,6 +45,18 @@ export const EXEC_TIMEOUT_MS = Number(process.env.EXEC_TIMEOUT_MS ?? 900_000)
 export const MAX_OUTPUT = 200_000
 export const MAX_WRITE_BYTES = Number(process.env.MAX_WRITE_BYTES ?? 1_000_000)
 
+/**
+ * Tran cho read_file. File to hon nay thi tu choi doc thay vi nap ca vao RAM roi
+ * nhoi vao context cua agent (mot file dump 500MB du de ha ca server).
+ */
+export const MAX_READ_BYTES = Number(process.env.MAX_READ_BYTES ?? 2_000_000)
+
+/**
+ * Thoi gian toi da mot tool chiu xep hang cho repo ranh. Het gio thi bao loi ro
+ * ("repo dang chay X") — truoc day agent chi thay dung may khong hieu vi sao.
+ */
+export const LOCK_WAIT_MS = Number(process.env.LOCK_WAIT_MS ?? 120_000)
+
 /** Kill switch toan cuc cho git_push. Repo van phai tu bat write. */
 export const ALLOW_PUSH = bool("ALLOW_PUSH", false)
 export const GIT_REMOTE = process.env.GIT_REMOTE ?? "origin"

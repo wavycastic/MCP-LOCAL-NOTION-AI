@@ -3,6 +3,7 @@ import { run } from "../exec.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
+import { noteTouched } from "../touched.js"
 
 export const removeFileSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
@@ -25,6 +26,7 @@ export async function removeFile(a: {
 	const r = await run(argv, { cwd: repo.root, timeoutMs: 60_000 })
 	if (r.code !== 0)
 		throw new Error(`git rm that bai: ${r.stderr.trim() || r.stdout.trim()}`)
+	noteTouched(repo.root, a.path)
 	return {
 		repo: repo.name,
 		branch,

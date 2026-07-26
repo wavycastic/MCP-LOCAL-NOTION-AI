@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { z } from "zod"
+import { MAX_READ_BYTES } from "../config.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
@@ -10,6 +11,13 @@ export const readFileSchema = {
 	line_end: z.number().int().min(1).optional(),
 }
 
+/** File binary co byte NUL trong vung dau. Text thi khong. */
+function looksBinary(buf: Buffer): boolean {
+	const n = Math.min(buf.length, 8_000)
+	for (let i = 0; i < n; i++) if (buf[i] === 0) return true
+	return false
+}
+
 export async function readFile(a: {
 	repo?: string
 	path: string
@@ -18,7 +26,22 @@ export async function readFile(a: {
 }) {
 	const repo = resolveRepo(a.repo)
 	const abs = safeResolve(repo.root, a.path)
-	const lines = readFileSync(abs, "utf8").split("\n")
+
+	const size = statSync(abs).size
+	if (size > MAX_READ_BYTES)
+		throw new Error(
+			`${a.path} nang ${size} bytes, vuot MAX_READ_BYTES=${MAX_READ_BYTES}. ` +
+				`Dung ripgrep de tim doan can xem thay vi doc ca file`,
+		)
+
+	const buf = readFileSync(abs)
+	if (looksBinary(buf))
+		throw new Error(
+			`${a.path} la file binary, doc ra text se chi la rac. ` +
+				`Neu can biet no la gi thi dung list_dir hoac git_log`,
+		)
+
+	const lines = buf.toString("utf8").split("\n")
 	const start = (a.line_start ?? 1) - 1
 	const end = Math.min(a.line_end ?? start + 400, lines.length) // luon phan trang
 	return {
