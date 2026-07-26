@@ -4,7 +4,7 @@
  * Tao 2 git repo tam trong mot workspace tam, roi goi truc tiep cac handler tool
  * (bo qua tang HTTP/MCP) de kiem tra: repo registry, quyen doc/ghi, chroot,
  * deny-list, branch guard, build/test theo toolchain, luong commit, duong lui,
- * tim xuyen repo, va job bat dong bo.
+ * tim xuyen repo, job bat dong bo, va cac tran an toan (binary, kich thuoc).
  *
  *   npm run smoke
  */
@@ -48,8 +48,20 @@ const rw = makeRepo("demo") // khai bao trong repos.json, write: true
 const ro = makeRepo("refonly") // chi duoc tim thay qua WORKSPACE_ROOT → chi doc
 writeFileSync(join(rw, ".env"), "SECRET=x\n") // phai bi deny-list chan
 
+// De trong repo CHI DOC de khong lam dirty repo demo (cac assertion "tree sach").
+writeFileSync(join(ro, "blob.bin"), Buffer.from([0x61, 0x00, 0x62, 0x63]))
+writeFileSync(join(ro, "huge.txt"), "z".repeat(9_000))
+
 const reposConfig = join(workspace, "repos.json")
-const goodConfig = JSON.stringify({ repos: [{ name: "demo", path: rw, write: true }] }, null, 2)
+const goodConfig = JSON.stringify(
+	{
+		// reindex that la `npx gitnexus analyze` — trong CI thi khong duoc goi mang.
+		defaults: { reindex: ["echo", "reindexed"] },
+		repos: [{ name: "demo", path: rw, write: true }],
+	},
+	null,
+	2,
+)
 writeFileSync(reposConfig, goodConfig)
 
 // Config doc env luc import — phai set TRUOC moi dynamic import ben duoi.
@@ -58,6 +70,8 @@ process.env.WORKSPACE_ROOT = workspace
 process.env.REPOS_CONFIG = reposConfig
 process.env.ALLOW_PUSH = "false"
 process.env.AUTO_DISCOVERED_WRITE = "false"
+process.env.MAX_READ_BYTES = "5000" // ha tran cho de test, moi file thuc te deu nho hon
+process.env.MAX_WRITE_BYTES = "5000"
 
 const { allRepos, invalidateRepoCache } = await import("../src/repos.js")
 const { redactForAudit } = await import("../src/log.js")
@@ -120,6 +134,16 @@ ok("read_file tra noi dung", r1.text.includes("hello"), r1.text)
 const d1 = await listDir({ repo: "demo" })
 ok("list_dir thay README.md", d1.entries.some((e) => e.name === "README.md"))
 ok("list_dir doc duoc ca repo chi doc", (await listDir({ repo: "refonly" })).entries.length > 0)
+await denies(
+	"read_file chan file binary",
+	() => readFile({ repo: "refonly", path: "blob.bin" }),
+	"binary",
+)
+await denies(
+	"read_file chan file qua lon",
+	() => readFile({ repo: "refonly", path: "huge.txt" }),
+	"MAX_READ_BYTES",
+)
 
 // —— Tim kiem ——
 console.log("\nripgrep")
@@ -197,6 +221,21 @@ await denies(
 	() => editFile({ repo: "demo", path: "src/a.ts", old_str: "khong-co", new_str: "x" }),
 	"khong tim thay",
 )
+await denies(
+	"edit_file chan ket qua vuot tran ghi",
+	() =>
+		editFile({
+			repo: "demo",
+			path: "src/a.ts",
+			old_str: "a = 2",
+			new_str: "a = " + "9".repeat(9_000),
+		}),
+	"MAX_WRITE_BYTES",
+)
+ok(
+	"file khong bi sua khi vuot tran",
+	(await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("a = 2"),
+)
 
 // —— Git ——
 console.log("\ngit")
@@ -204,21 +243,40 @@ const s1 = await gitStatus({ repo: "demo" })
 ok("git_status thay dirty", s1.dirty === true)
 ok("git_status bao writable", s1.writable === true)
 
-// `git add -A` se stage ca .env — phai bi chan, khong duoc de secret ra remote.
+// all=true se stage ca .env — phai bi chan, khong duoc de secret ra remote.
 await denies(
 	"git_commit chan file trong deny-list",
-	() => gitCommit({ repo: "demo", message: "smoke: add a.ts" }),
+	() => gitCommit({ repo: "demo", message: "smoke: add a.ts", all: true }),
 	"deny-list",
 )
 writeFileSync(join(rw, ".gitignore"), ".env\n")
 
+// Mac dinh: CHI stage file do tool sua (src/a.ts), khong keo .gitignore vao.
 const cm = await gitCommit({ repo: "demo", message: "smoke: add a.ts" })
 ok("git_commit tra sha", cm.sha.length > 0 && cm.exit_code === 0, JSON.stringify(cm))
+ok(
+	"git_commit bao ro da commit file nao",
+	Array.isArray(cm.committed) && cm.committed.includes("src/a.ts"),
+	JSON.stringify(cm.committed),
+)
+ok("git_commit tu day job reindex", typeof cm.reindex_job === "string", JSON.stringify(cm))
 const tracked = execFileSync("git", ["ls-files"], { cwd: rw, encoding: "utf8" })
 	.split("\n")
 	.map((l) => l.trim())
 ok("src/a.ts da vao commit", tracked.includes("src/a.ts"))
 ok(".env KHONG bi commit", !tracked.includes(".env"), tracked.join(" "))
+ok(
+	"file nguoi dung tu tao KHONG bi keo vao commit",
+	!tracked.includes(".gitignore"),
+	tracked.join(" "),
+)
+await denies(
+	"commit lan 2 khi tool chua sua gi thi bao loi",
+	() => gitCommit({ repo: "demo", message: "smoke: rong" }),
+	"khong co file nao",
+)
+const cm2 = await gitCommit({ repo: "demo", message: "smoke: gitignore", all: true })
+ok("all=true commit duoc thay doi ngoai tool", cm2.exit_code === 0, JSON.stringify(cm2))
 ok("tree sach sau commit", (await gitStatus({ repo: "demo" })).dirty === false)
 
 // —— Duong lui ——
@@ -236,6 +294,11 @@ ok(
 	JSON.stringify(rs),
 )
 ok("tree sach sau restore", (await gitStatus({ repo: "demo" })).dirty === false)
+await denies(
+	"sau restore thi khong con gi de commit",
+	() => gitCommit({ repo: "demo", message: "smoke: sau restore" }),
+	"khong co file nao",
+)
 await denies(
 	'git_restore tu choi "."',
 	() => gitRestore({ repo: "demo", paths: ["."] }),
@@ -259,7 +322,9 @@ await denies(
 
 const rm = await removeFile({ repo: "demo", path: "src/a.ts" })
 ok("remove_file xoa file da track", rm.exit_code === 0)
-await gitCommit({ repo: "demo", message: "smoke: remove a.ts" })
+const cm3 = await gitCommit({ repo: "demo", message: "smoke: remove a.ts" })
+ok("commit duoc ca file bi xoa", cm3.exit_code === 0, JSON.stringify(cm3))
+ok("tree sach sau commit xoa", (await gitStatus({ repo: "demo" })).dirty === false)
 
 await denies("git_push bi tat mac dinh", () => gitPush({ repo: "demo" }), "bi tat")
 
@@ -287,6 +352,9 @@ for (let i = 0; i < 100 && !js.done; i++) {
 ok("job chay xong, exit 0", js.status === "done" && js.exit_code === 0, JSON.stringify(js))
 ok("job co output", String(js.output ?? "").includes("built"), String(js.output))
 ok("liet ke duoc job", (await jobStatus({ repo: "demo" })).jobs.length >= 1)
+const rj: any = await jobStatus({ job_id: String(cm.reindex_job) })
+ok("job reindex cua commit da chay", rj.status === "done", JSON.stringify(rj))
+ok("reindex dung lenh cua repo", String(rj.command).includes("echo"), String(rj.command))
 await denies(
 	"job_status bao loi voi job_id la",
 	() => jobStatus({ job_id: "job-9999" }),
