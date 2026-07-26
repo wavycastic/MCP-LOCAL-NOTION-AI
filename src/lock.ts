@@ -1,32 +1,48 @@
 /**
- * Mutex don gian, serialize cac tool co side effect (edit/create/move/remove,
- * build/test, commit/push, reindex).
+ * Mutex theo TUNG REPO. Tool co side effect tren cung mot repo chay tuan tu;
+ * hai repo khac nhau chay song song binh thuong.
  *
  * Ly do: agent goi tool song song rat de gay race — vd edit_file trong khi
- * run_build dang doc file, hoac hai git_commit chay chong len nhau.
+ * run_build dang doc file, hoac hai git_commit chong len nhau.
  */
 
-let tail: Promise<unknown> = Promise.resolve()
-let holder: string | null = null
-let queued = 0
+type Lane = { tail: Promise<unknown>; holder: string | null; queued: number }
 
-export function lockState() {
-	return { holder, queued }
+const lanes = new Map<string, Lane>()
+
+function lane(key: string): Lane {
+	let l = lanes.get(key)
+	if (!l) {
+		l = { tail: Promise.resolve(), holder: null, queued: 0 }
+		lanes.set(key, l)
+	}
+	return l
 }
 
-export function withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
-	queued++
-	const result = tail.then(async () => {
-		queued--
-		holder = name
+export function lockState() {
+	return [...lanes.entries()]
+		.filter(([, l]) => l.holder !== null || l.queued > 0)
+		.map(([repo, l]) => ({ repo, holder: l.holder, queued: l.queued }))
+}
+
+export function withLock<T>(
+	repoKey: string,
+	name: string,
+	fn: () => Promise<T>,
+): Promise<T> {
+	const l = lane(repoKey)
+	l.queued++
+	const result = l.tail.then(async () => {
+		l.queued--
+		l.holder = name
 		try {
 			return await fn()
 		} finally {
-			holder = null
+			l.holder = null
 		}
 	})
 	// Giu chuoi khong bi vo khi 1 tool throw.
-	tail = result.then(
+	l.tail = result.then(
 		() => undefined,
 		() => undefined,
 	)

@@ -1,6 +1,5 @@
 import { existsSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
-import { REPO_ROOT } from "../config.js"
 
 const DENY: RegExp[] = [
 	/(^|\/)\.env(\..*)?$/,
@@ -14,16 +13,20 @@ const DENY: RegExp[] = [
 export class PathDenied extends Error {}
 
 /**
- * Core: resolve `rel` vao trong REPO_ROOT, chan symlink escape va deny-list.
- * Hoat dong ca khi path chua ton tai: realpath ancestor gan nhat roi ghep lai duoi.
+ * Core: resolve `rel` vao trong `root` (root cua MOT repo), chan symlink escape
+ * va deny-list. Hoat dong ca khi path chua ton tai: realpath ancestor gan nhat
+ * roi ghep lai phan duoi.
+ *
+ * Moi tool phai di qua ham nay. Root luon la repo dang lam viec, khong bao gio
+ * la WORKSPACE_ROOT — nho vay khong the doc cheo tu repo A sang repo B bang "../".
  */
-function resolveInRoot(rel: string): string {
+function resolveInRoot(root: string, rel: string): string {
 	if (typeof rel !== "string" || rel.length === 0)
 		throw new PathDenied("path required")
 	if (rel.includes("\0")) throw new PathDenied("invalid path")
 	if (isAbsolute(rel)) throw new PathDenied("path must be relative to repo root")
 
-	const target = resolve(REPO_ROOT, rel)
+	const target = resolve(root, rel)
 
 	let anc = target
 	const tail: string[] = []
@@ -34,11 +37,10 @@ function resolveInRoot(rel: string): string {
 		anc = parent
 	}
 
-	const real = tail.length === 0
-		? realpathSync(anc)
-		: resolve(realpathSync(anc), ...tail)
+	const real =
+		tail.length === 0 ? realpathSync(anc) : resolve(realpathSync(anc), ...tail)
 
-	const r = relative(REPO_ROOT, real)
+	const r = relative(root, real)
 	if (r === "" || r.startsWith("..") || isAbsolute(r))
 		throw new PathDenied("path escapes repo root")
 
@@ -50,20 +52,20 @@ function resolveInRoot(rel: string): string {
 }
 
 /** Path phai TON TAI. Dung cho read_file, edit_file, git_blame, git_diff. */
-export function safeResolve(rel: string): string {
-	const abs = resolveInRoot(rel)
+export function safeResolve(root: string, rel: string): string {
+	const abs = resolveInRoot(root, rel)
 	if (!existsSync(abs)) throw new PathDenied(`not found: ${rel}`)
 	return abs
 }
 
-/** Path CHUA CAN ton tai. Dung cho create_file, move_file (dich). */
-export function safeResolveNew(rel: string): string {
-	return resolveInRoot(rel)
+/** Path CHUA CAN ton tai. Dung cho create_file va dich cua move_file. */
+export function safeResolveNew(root: string, rel: string): string {
+	return resolveInRoot(root, rel)
 }
 
 /** Nhu safeResolve nhung cho phep chinh repo root ("." hoac ""). Chi dung cho doc thu muc. */
-export function safeResolveDir(rel?: string): string {
+export function safeResolveDir(root: string, rel?: string): string {
 	const r = (rel ?? ".").trim()
-	if (r === "" || r === "." || r === "./") return REPO_ROOT
-	return safeResolve(r)
+	if (r === "" || r === "." || r === "./") return root
+	return safeResolve(root, r)
 }

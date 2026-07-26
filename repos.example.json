@@ -1,0 +1,28 @@
+{
+  "defaults": {
+    "branchPrefix": "agent/",
+    "reindex": ["npx", "gitnexus", "analyze"]
+  },
+  "repos": [
+    {
+      "name": "CV-AUT",
+      "path": "/home/you/mirrors/CV-AUT",
+      "write": true,
+      "build": ["dotnet", "build", "--nologo", "-warnaserror"],
+      "test": ["dotnet", "test", "--nologo"]
+    },
+    {
+      "name": "my-web-app",
+      "path": "/home/you/mirrors/my-web-app",
+      "write": true
+    },
+    {
+      "name": "avalonia",
+      "path": "/home/you/mirrors/Avalonia"
+    },
+    {
+      "name": "runtime",
+      "path": "/home/you/mirrors/dotnet-runtime"
+    }
+  ]
+}

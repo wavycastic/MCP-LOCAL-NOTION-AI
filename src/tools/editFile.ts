@@ -1,9 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { z } from "zod"
 import { assertWritableBranch } from "../git.js"
+import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
 export const editFileSchema = {
+	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
 	path: z.string().describe("Duong dan tuong doi so voi repo root"),
 	old_str: z.string().describe("Doan text can thay. Phai khop CHINH XAC, ke ca whitespace"),
 	new_str: z.string().describe("Doan text thay vao"),
@@ -11,13 +13,15 @@ export const editFileSchema = {
 }
 
 export async function editFile(a: {
+	repo?: string
 	path: string
 	old_str: string
 	new_str: string
 	replace_all?: boolean
 }) {
-	await assertWritableBranch()
-	const abs = safeResolve(a.path)
+	const repo = resolveRepo(a.repo)
+	const branch = await assertWritableBranch(repo)
+	const abs = safeResolve(repo.root, a.path)
 	const src = readFileSync(abs, "utf8")
 
 	const parts = src.split(a.old_str)
@@ -32,5 +36,5 @@ export async function editFile(a: {
 		? parts.join(a.new_str)
 		: src.replace(a.old_str, a.new_str)
 	writeFileSync(abs, next, "utf8")
-	return { path: a.path, replacements: a.replace_all ? n : 1 }
+	return { repo: repo.name, branch, path: a.path, replacements: a.replace_all ? n : 1 }
 }
