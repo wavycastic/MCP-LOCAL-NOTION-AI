@@ -3,7 +3,8 @@
  *
  * Tao 2 git repo tam trong mot workspace tam, roi goi truc tiep cac handler tool
  * (bo qua tang HTTP/MCP) de kiem tra: repo registry, quyen doc/ghi, chroot,
- * deny-list, branch guard, build/test theo toolchain, va luong commit.
+ * deny-list, branch guard, build/test theo toolchain, luong commit, duong lui,
+ * tim xuyen repo, va job bat dong bo.
  *
  *   npm run smoke
  */
@@ -15,6 +16,8 @@ import { join } from "node:path"
 function git(cwd: string, ...args: string[]) {
 	execFileSync("git", args, { cwd, stdio: "pipe" })
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const workspace = mkdtempSync(join(tmpdir(), "local-repo-mcp-smoke-"))
 
@@ -42,14 +45,12 @@ function makeRepo(name: string): string {
 }
 
 const rw = makeRepo("demo") // khai bao trong repos.json, write: true
-makeRepo("refonly") // chi duoc tim thay qua WORKSPACE_ROOT → chi doc
+const ro = makeRepo("refonly") // chi duoc tim thay qua WORKSPACE_ROOT → chi doc
 writeFileSync(join(rw, ".env"), "SECRET=x\n") // phai bi deny-list chan
 
 const reposConfig = join(workspace, "repos.json")
-writeFileSync(
-	reposConfig,
-	JSON.stringify({ repos: [{ name: "demo", path: rw, write: true }] }, null, 2),
-)
+const goodConfig = JSON.stringify({ repos: [{ name: "demo", path: rw, write: true }] }, null, 2)
+writeFileSync(reposConfig, goodConfig)
 
 // Config doc env luc import — phai set TRUOC moi dynamic import ben duoi.
 process.env.MCP_TOKEN = "smoke-token"
@@ -58,16 +59,21 @@ process.env.REPOS_CONFIG = reposConfig
 process.env.ALLOW_PUSH = "false"
 process.env.AUTO_DISCOVERED_WRITE = "false"
 
+const { allRepos, invalidateRepoCache } = await import("../src/repos.js")
+const { redactForAudit } = await import("../src/log.js")
 const { listRepos } = await import("../src/tools/listRepos.js")
 const { readFile } = await import("../src/tools/readFile.js")
 const { listDir } = await import("../src/tools/listDir.js")
+const { ripgrep } = await import("../src/tools/ripgrep.js")
 const { createFile } = await import("../src/tools/createFile.js")
 const { editFile } = await import("../src/tools/editFile.js")
 const { removeFile } = await import("../src/tools/removeFile.js")
 const { gitCommit } = await import("../src/tools/gitCommit.js")
+const { gitRestore } = await import("../src/tools/gitRestore.js")
 const { gitStatus } = await import("../src/tools/gitStatus.js")
 const { gitPush } = await import("../src/tools/gitPush.js")
 const { runBuild, runTests } = await import("../src/tools/runTests.js")
+const { jobStatus } = await import("../src/tools/jobStatus.js")
 
 let pass = 0
 let fail = 0
@@ -114,6 +120,15 @@ ok("read_file tra noi dung", r1.text.includes("hello"), r1.text)
 const d1 = await listDir({ repo: "demo" })
 ok("list_dir thay README.md", d1.entries.some((e) => e.name === "README.md"))
 ok("list_dir doc duoc ca repo chi doc", (await listDir({ repo: "refonly" })).entries.length > 0)
+
+// —— Tim kiem ——
+console.log("\nripgrep")
+const g1 = await ripgrep({ repo: "demo", pattern: "hello" })
+ok("ripgrep tim trong 1 repo", g1.results[0].matches.includes("README.md"), JSON.stringify(g1))
+const g2 = await ripgrep({ all_repos: true, pattern: "hello" })
+ok("ripgrep xuyen repo thay ca 2", g2.results.length === 2, JSON.stringify(g2.repos_searched))
+const g3 = await ripgrep({ repo: "demo", pattern: "chuoi-khong-bao-gio-ton-tai" })
+ok("khong match thi tra rong, khong phai loi", g3.results[0].matches.trim() === "")
 
 // —— Chroot + deny-list ——
 console.log("\nchroot & deny-list")
@@ -206,13 +221,49 @@ ok("src/a.ts da vao commit", tracked.includes("src/a.ts"))
 ok(".env KHONG bi commit", !tracked.includes(".env"), tracked.join(" "))
 ok("tree sach sau commit", (await gitStatus({ repo: "demo" })).dirty === false)
 
+// —— Duong lui ——
+console.log("\ngit_restore")
+await editFile({ repo: "demo", path: "src/a.ts", old_str: "a = 2", new_str: "a = 999" })
+ok(
+	"da sua lam truoc khi hoan tac",
+	(await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("999"),
+)
+const rs = await gitRestore({ repo: "demo", paths: ["src/a.ts"] })
+ok(
+	"git_restore tra file ve HEAD",
+	rs.exit_code === 0 &&
+		(await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("a = 2"),
+	JSON.stringify(rs),
+)
+ok("tree sach sau restore", (await gitStatus({ repo: "demo" })).dirty === false)
+await denies(
+	'git_restore tu choi "."',
+	() => gitRestore({ repo: "demo", paths: ["."] }),
+	"khong hop le",
+)
+await denies(
+	"git_restore tu choi wildcard",
+	() => gitRestore({ repo: "demo", paths: ["src/*.ts"] }),
+	"khong hop le",
+)
+await denies(
+	"git_restore tu choi file chua track",
+	() => gitRestore({ repo: "demo", paths: ["src/chua-co.ts"] }),
+	"chua track",
+)
+await denies(
+	"git_restore chan repo chi doc",
+	() => gitRestore({ repo: "refonly", paths: ["README.md"] }),
+	"chi-doc",
+)
+
 const rm = await removeFile({ repo: "demo", path: "src/a.ts" })
 ok("remove_file xoa file da track", rm.exit_code === 0)
 await gitCommit({ repo: "demo", message: "smoke: remove a.ts" })
 
 await denies("git_push bi tat mac dinh", () => gitPush({ repo: "demo" }), "bi tat")
 
-// —— Build & test theo toolchain ——
+// —— Build & test dong bo ——
 console.log("\nbuild & test")
 const b1 = await runBuild({ repo: "demo" })
 ok("run_build chay lenh cua repo", b1.exit_code === 0 && b1.output.includes("built"), b1.output)
@@ -223,6 +274,58 @@ await denies(
 	() => runTests({ repo: "demo", filter: "SomeTest" }),
 	"chi ho tro toolchain dotnet",
 )
+
+// —— Job bat dong bo ——
+console.log("\njob bat dong bo")
+const jb: any = await runBuild({ repo: "demo", background: true })
+ok("run_build background tra job_id ngay", typeof jb.job_id === "string", JSON.stringify(jb))
+let js: any = await jobStatus({ job_id: jb.job_id })
+for (let i = 0; i < 100 && !js.done; i++) {
+	await sleep(100)
+	js = await jobStatus({ job_id: jb.job_id })
+}
+ok("job chay xong, exit 0", js.status === "done" && js.exit_code === 0, JSON.stringify(js))
+ok("job co output", String(js.output ?? "").includes("built"), String(js.output))
+ok("liet ke duoc job", (await jobStatus({ repo: "demo" })).jobs.length >= 1)
+await denies(
+	"job_status bao loi voi job_id la",
+	() => jobStatus({ job_id: "job-9999" }),
+	"khong biet job",
+)
+
+// —— Audit log khong duoc chua noi dung file ——
+console.log("\naudit")
+const red = redactForAudit({
+	repo: "demo",
+	path: "src/a.ts",
+	content: "SECRET_TOKEN_" + "x".repeat(5000),
+}) as Record<string, unknown>
+ok("khong ghi noi dung file vao audit", !String(red.content).includes("SECRET_TOKEN"))
+ok("chi ghi do dai", String(red.content).includes("chars"), String(red.content))
+ok("truong ngan van giu nguyen", red.path === "src/a.ts")
+
+// —— Cau hinh sai phai sap ngay, khong duoc chay tiep ——
+console.log("\ncau hinh sai")
+writeFileSync(
+	reposConfig,
+	JSON.stringify({
+		repos: [
+			{ name: "dup", path: rw, write: true },
+			{ name: "dup", path: ro },
+		],
+	}),
+)
+invalidateRepoCache()
+try {
+	allRepos()
+	fail++
+	console.error("  FAIL  trung ten repo phai bao loi — khong throw")
+} catch (e) {
+	ok("trung ten repo bi chan ngay", String(e).includes("trung"), String(e))
+}
+writeFileSync(reposConfig, goodConfig)
+invalidateRepoCache()
+ok("khoi phuc duoc sau khi sua config", allRepos().length === 2)
 
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail === 0 ? 0 : 1)

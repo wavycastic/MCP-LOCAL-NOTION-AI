@@ -13,6 +13,8 @@ src/security/paths.ts  chroot theo TUNG repo + deny-list
 src/exec.ts            spawn khong shell, cwd bat buoc
 src/git.ts             hai cua kiem tra truoc khi ghi
 src/lock.ts            mutex theo tung repo
+src/jobs.ts            job chay dai (build/test background), van di qua mutex
+src/log.ts             audit.log: redact noi dung file + rotate
 src/tools/*.ts         moi tool: schema zod + handler
 src/tools/index.ts     registry: annotations, lock, audit, isError
 ```
@@ -35,8 +37,16 @@ Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo 
    repo trong `repos.json` chi ghi duoc khi `"write": true`. Dung doi mac dinh nay.
 6. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, `git push --force`.**
    Local la nguon su that; cac lenh nay xoa dung thu agent vua viet.
+   Ngoai le duy nhat da can nhac: `git_restore` chay `git checkout HEAD -- <cac file cu the>`.
+   No BAT BUOC path-scoped — chan `.`, `..`, `/`, wildcard, va chan ca file chua track.
+   Dung mo rong no thanh dang nhan thu muc hay pattern.
 7. **Khong co `write_file` ghi de ca file.** `create_file` chi tao file moi, `edit_file` chi
    string-replace. Day la thiet ke, khong phai thieu sot.
+8. **Ten repo la dinh danh, phai duy nhat.** `assertUniqueNames` trong `repos.ts` lam server sap ngay
+   khi trung ten. Dung "sua" bang cach tu them hau to — chon sai repo mot cach im lang te hon nhieu
+   so voi loi cau hinh hien ro.
+9. **`audit.log` khong duoc chua noi dung file.** Truong `content`/`new_str`/`old_str` chi ghi do dai
+   (`redactForAudit`). Them truong moi co the chua du lieu lon thi phai them vao danh sach elide.
 
 ## Them mot tool moi
 
@@ -48,9 +58,16 @@ Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo 
 4. Dang ky trong `src/tools/index.ts` bang `reg(...)`:
    - `{ readOnly: true }` cho tool chi doc — khong bi serialize qua mutex.
    - bo `readOnly` cho tool co side effect — chay trong `withLock(repo, ...)`.
-   - `{ destructive: true }` cho tool xoa du lieu.
+   - `{ destructive: true }` cho tool xoa du lieu hoac bo thay doi.
 5. Description la giao dien that voi agent. Viet ro **khi nao dung** va **khi nao dung tool khac**.
    Description kem lam agent dung sai tool, khong phai loi code.
+6. Them assertion vao `scripts/smoke.ts` — ca duong thanh cong va duong bi chan.
+
+## Lenh chay dai
+
+Tool chay lenh > 1 phut nen ho tro `background: true`: goi `startJob(repo.name, repo.root, argv)`
+trong `src/jobs.ts` va tra ve `job_id`. Job phai chay **trong `withLock`** — bo lock chi vi doi sang
+bat dong bo la mo lai dung cai race ma mutex sinh ra de chan.
 
 ## Ho tro mot toolchain moi
 
@@ -69,7 +86,13 @@ tin cay: neu doan sai thi tot hon la tra `undefined` de `run_build` bao loi ro r
 ## Truoc khi commit
 
 ```bash
-npx tsc --noEmit
+npm run typecheck
+npm run smoke
 ```
 
-CI chay dung lenh nay tren main va moi PR.
+CI chay dung hai lenh nay tren main va moi PR. Luu y `scripts/` khong nam trong `rootDir` cua
+`tsconfig.json` nen `typecheck` **khong** kiem smoke test — loi trong smoke chi lo ra khi chay.
+
+Smoke test tu tao repo git tam va tu ghi `user.email`/`user.name` vao `.git/config` cua chung.
+Dung dua vao gitconfig global: runner CI khong co, va `exec.ts` loc env nen `git -c` cua tien trinh
+cha khong truyen sang lenh do tool goi.
