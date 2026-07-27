@@ -9,14 +9,20 @@ export async function listRepos(a: { refresh?: boolean } = {}) {
 	const repos = allRepos()
 	return {
 		count: repos.length,
-		repos: repos.map((r) => ({
-			name: r.name,
-			write: r.write,
-			branch_prefix: r.write ? r.branchPrefix + "*" : null,
-			toolchain: r.toolchain,
-			can_build: Boolean(r.build),
-			can_test: Boolean(r.test),
-			source: r.source,
-		})),
+		repos: repos.map((r) => {
+			const p = r.branchPrefix.trim()
+			const anyBranch = p === "" || p === "*"
+			return {
+				name: r.name,
+				write: r.write,
+				// Khong noi "**": voi prefix "*" thi cong them dau sao nua thanh vo nghia.
+				// Noi thang "moi branch" de agent khoi di tao branch agent/... vo ich.
+				branch_prefix: r.write ? (anyBranch ? "(moi branch)" : p + "*") : null,
+				toolchain: r.toolchain,
+				can_build: Boolean(r.build),
+				can_test: Boolean(r.test),
+				source: r.source,
+			}
+		}),
 	}
 }
