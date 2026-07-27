@@ -9,6 +9,7 @@ import {
 	REPOS_CONFIG,
 	WORKSPACE_ROOT,
 } from "./config.js"
+import { killRunningJobs } from "./jobs.js"
 import { lockState } from "./lock.js"
 import { allRepos } from "./repos.js"
 import { registerAll } from "./tools/index.js"
@@ -95,9 +96,33 @@ const httpServer = app.listen(PORT, "127.0.0.1", () => {
 	}
 })
 
+/**
+ * Tat server: phai giet cac job dang chay TRUOC khi thoat.
+ *
+ * Truoc day chi dong HTTP server roi exit(0). `dotnet build` hay
+ * `npx gitnexus analyze` la tien trinh con, khong chet theo cha tren Windows:
+ * chung chay tiep, giu khoa file trong repo (bin/obj), va khong con ai doc duoc
+ * ket qua vi bang job da bay cung process. Ctrl+C hai lan van thoat ngay duoc.
+ */
+let shuttingDown = false
+
+function shutdown(sig: string) {
+	if (shuttingDown) {
+		console.log(`${sig} lan hai — thoat ngay`)
+		process.exit(130)
+	}
+	shuttingDown = true
+
+	const killed = killRunningJobs()
+	console.log(`${sig} — shutting down${killed > 0 ? `, da huy ${killed} job dang chay` : ""}`)
+
+	httpServer.close(() => process.exit(0))
+
+	// Ket noi dang mo co the giu server song vo han; dung cho mai.
+	const t = setTimeout(() => process.exit(0), 5_000)
+	t.unref()
+}
+
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
-	process.on(sig, () => {
-		console.log(`${sig} — shutting down`)
-		httpServer.close(() => process.exit(0))
-	})
+	process.on(sig, () => shutdown(sig))
 }
