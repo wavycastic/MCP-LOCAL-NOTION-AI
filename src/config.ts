@@ -89,5 +89,12 @@ export const SYNC_WAIT_MS = Number(process.env.SYNC_WAIT_MS ?? 60_000)
 export const ALLOW_PUSH = bool("ALLOW_PUSH", false)
 export const GIT_REMOTE = process.env.GIT_REMOTE ?? "origin"
 
+/**
+ * Kill switch cho tool chay terminal lenh tu do. Mac dinh tat vi day la duong
+ * nguy hiem nhat: agent co the chay lenh xoa file, doc secret, network call,
+ * hay bat ky lenh nao khac ma shell cho phep.
+ */
+export const ALLOW_TERMINAL = bool("ALLOW_TERMINAL", true)
+
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
 export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")
