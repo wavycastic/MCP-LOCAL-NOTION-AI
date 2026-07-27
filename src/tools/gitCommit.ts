@@ -23,6 +23,17 @@ export const gitCommitSchema = {
 		),
 }
 
+async function stagedFiles(root: string): Promise<string[]> {
+	const r = await run(["git", "diff", "--cached", "--name-only"], {
+		cwd: root,
+		timeoutMs: 30_000,
+	})
+	return r.stdout
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean)
+}
+
 export async function gitCommit(a: {
 	repo?: string
 	message: string
@@ -51,15 +62,8 @@ export async function gitCommit(a: {
 
 	// Deny-list phai chan ca duong RA. Chi chan doc thi chua du: `git add -A` rat de
 	// keo .env hay key vao commit roi day len remote.
-	const staged = await run(["git", "diff", "--cached", "--name-only"], {
-		cwd: repo.root,
-		timeoutMs: 30_000,
-	})
-	const denied = staged.stdout
-		.split("\n")
-		.map((l) => l.trim())
-		.filter(Boolean)
-		.filter(isDeniedRelPath)
+	const staged = await stagedFiles(repo.root)
+	const denied = staged.filter(isDeniedRelPath)
 
 	if (denied.length > 0) {
 		// reset theo path: chi bo stage, KHONG doi working tree (khong --hard).
@@ -70,11 +74,27 @@ export async function gitCommit(a: {
 		)
 	}
 
-	// spawn khong qua shell nen truyen -m truc tiep la an toan.
-	const r = await run(["git", "commit", "-m", a.message], {
-		cwd: repo.root,
-		timeoutMs: 60_000,
-	})
+	/*
+	 * Truoc day gap truong hop sua file thanh noi dung y het ban cu: khong co gi
+	 * duoc stage, git tra exit 1 kem chu "nothing to commit" roi agent nhan mot loi
+	 * kho hieu. Kiem truoc de bao dung nguyen nhan.
+	 */
+	if (staged.length === 0)
+		throw new Error(
+			`khong co thay doi nao de commit trong repo "${repo.name}" — ` +
+				`noi dung file sau khi sua co the giong het ban cu. Kiem bang git_diff`,
+		)
+
+	/*
+	 * Gioi han commit trong dung pham vi path agent da cham: neu nguoi dung da tu
+	 * `git add` viec dang lam do cua ho thi commit nay khong duoc om theo. Voi
+	 * all=true thi nguoi goi da chu dong xin om het.
+	 * spawn khong qua shell nen truyen -m truc tiep la an toan.
+	 */
+	const argv = a.all
+		? ["git", "commit", "-m", a.message]
+		: ["git", "commit", "-m", a.message, "--", ...touched]
+	const r = await run(argv, { cwd: repo.root, timeoutMs: 60_000 })
 	if (r.code !== 0)
 		throw new Error(
 			`git commit that bai (exit ${r.code}): ${r.stderr.trim() || r.stdout.trim()}`,
