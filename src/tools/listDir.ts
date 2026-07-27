@@ -31,8 +31,12 @@ export async function listDir(a: {
 	const limit = a.max_entries ?? 300
 	const raw = readdirSync(abs, { withFileTypes: true })
 
-	const entries = raw
-		.filter((e) => !SKIP.has(e.name))
+	// Tach 2 buoc: "bi skip" khac "bi cat vi qua limit". Truoc day total = raw.length
+	// nen thu muc chua bin/obj luon bao truncated:true du da tra du entry -> agent
+	// tuong con file an va di doc lai vo ich.
+	const kept = raw.filter((e) => !SKIP.has(e.name))
+
+	const entries = kept
 		.slice(0, limit)
 		.map((e) => {
 			const isDir = e.isDirectory()
@@ -51,8 +55,11 @@ export async function listDir(a: {
 	return {
 		repo: repo.name,
 		path: a.path ?? ".",
-		total: raw.length,
-		truncated: raw.length > entries.length,
+		/** So entry sau khi bo cac thu muc trong SKIP. */
+		total: kept.length,
+		/** Chi true khi that su con entry chua tra vi vuot max_entries. */
+		truncated: kept.length > entries.length,
+		skipped_dirs: raw.length - kept.length,
 		skipped: [...SKIP],
 		entries,
 	}
