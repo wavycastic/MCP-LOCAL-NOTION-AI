@@ -20,11 +20,23 @@ const jobs = new Map<string, Job>()
 const MAX_JOBS = 50
 let seq = 0
 
+function isFinished(j: Job): boolean {
+	return j.status === "done" || j.status === "failed"
+}
+
+/**
+ * Chi don job DA KET THUC, cu nhat truoc (Map giu thu tu chen).
+ *
+ * Truoc day xoa thang key dau tien bat ke status: mot build dai co the bi xoa khoi
+ * bang trong khi tien trinh van chay, roi job_status tra "khong biet job" — agent
+ * tuong build bay hoi. Neu tat ca 50 job dang chay thi cu de vuot han, chung se
+ * ket thuc va bi don o lan sau.
+ */
 function prune() {
-	while (jobs.size > MAX_JOBS) {
-		const oldest = jobs.keys().next()
-		if (oldest.done) return
-		jobs.delete(oldest.value)
+	if (jobs.size <= MAX_JOBS) return
+	for (const [id, j] of jobs) {
+		if (jobs.size <= MAX_JOBS) return
+		if (isFinished(j)) jobs.delete(id)
 	}
 }
 
