@@ -1,7 +1,10 @@
-FROM node:22-alpine
+FROM node:22-slim
 
-# Install git, ripgrep, bash, curl + .NET dependencies
-RUN apk add --no-cache git ripgrep bash curl icu-libs krb5-libs libgcc libintl libssl3 libstdc++ zlib
+# Install git, ripgrep, curl + .NET dependencies (glibc via Debian slim)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates ripgrep \
+    libicu-dev libssl3 libgcc-s1 zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK 10.0 (CV-AUT targets .NET 10)
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir /usr/share/dotnet \
