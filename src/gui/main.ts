@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 type ProcState = { running: boolean; pid: number | null; startedAt: string | null }
@@ -12,6 +13,7 @@ type DashboardConfig = {
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
 }
+type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken">>
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -20,6 +22,32 @@ let isQuitting = false
 const procs: Record<"mcp" | "gitnexus", { child: ChildProcessWithoutNullStreams | null; startedAt: string | null }> = {
 	mcp: { child: null, startedAt: null },
 	gitnexus: { child: null, startedAt: null },
+}
+
+function randomToken(): string {
+	return randomBytes(32).toString("hex")
+}
+
+function savedConfigPath(): string {
+	return join(app.getPath("userData"), "dashboard-config.json")
+}
+
+function readSavedConfig(): SavedDashboardConfig {
+	const p = savedConfigPath()
+	if (!existsSync(p)) return {}
+	try {
+		return JSON.parse(readFileSync(p, "utf8")) as SavedDashboardConfig
+	} catch {
+		return {}
+	}
+}
+
+function writeSavedConfig(cfg: SavedDashboardConfig): SavedDashboardConfig {
+	const current = readSavedConfig()
+	const next: SavedDashboardConfig = { ...current, ...cfg }
+	mkdirSync(dirname(savedConfigPath()), { recursive: true })
+	writeFileSync(savedConfigPath(), JSON.stringify(next, null, 2), "utf8")
+	return next
 }
 
 function rootDir(): string {
@@ -54,16 +82,24 @@ function readEnvValue(key: string): string | null {
 }
 
 function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
+	const saved = readSavedConfig()
 	const host = env.HOST || readEnvValue("HOST") || "127.0.0.1"
 	const port = env.PORT || readEnvValue("PORT") || "8765"
 	const gitPort = env.GITNEXUS_PROXY_PORT || "3000"
-	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || ""
+	const mcpToken = env.MCP_TOKEN || saved.mcpToken || readEnvValue("MCP_TOKEN") || randomToken()
+	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || saved.gitnexusToken || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || randomToken()
+	writeSavedConfig({
+		mcpToken,
+		gitnexusToken: gitToken,
+		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
+		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
+	})
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
-		mcpPublicUrl: "https://mcp.wavycastic.id.vn/mcp",
-		mcpToken: env.MCP_TOKEN || readEnvValue("MCP_TOKEN"),
+		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
+		mcpToken,
 		gitnexusLocalUrl: `http://127.0.0.1:${gitPort}/mcp`,
-		gitnexusPublicUrl: "https://gitnexus.wavycastic.id.vn/mcp",
+		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
 		gitnexusToken: gitToken,
 	}
 }
@@ -179,6 +215,7 @@ function startMcp(env: Record<string, string>) {
 	procs.mcp.child = spawn(process.execPath, [entry], {
 		cwd: repoRoot(),
 		env: { ...process.env, ...env, ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
+		windowsHide: true,
 	})
 	wire("mcp")
 	appendLog("gui", `started local-repo-mcp pid=${procs.mcp.child.pid ?? "?"}`)
@@ -195,6 +232,7 @@ function startGitnexus(env: Record<string, string>) {
 	procs.gitnexus.child = spawn(process.execPath, [entry, token], {
 		cwd: repoRoot(),
 		env: { ...process.env, ...env, AUTH_TOKEN: token, ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
+		windowsHide: true,
 	})
 	wire("gitnexus")
 	appendLog("gui", `started gitnexus proxy pid=${procs.gitnexus.child.pid ?? "?"}`)
@@ -226,6 +264,7 @@ function stop(kind: "mcp" | "gitnexus") {
 
 ipcMain.handle("state", () => state())
 ipcMain.handle("config", (_evt: unknown, env: Record<string, string>) => dashboardConfig(env))
+ipcMain.handle("save-config", (_evt: unknown, cfg: SavedDashboardConfig) => writeSavedConfig(cfg))
 ipcMain.handle("start-mcp", (_evt: unknown, env: Record<string, string>) => startMcp(env))
 ipcMain.handle("stop-mcp", () => stop("mcp"))
 ipcMain.handle("start-gitnexus", (_evt: unknown, env: Record<string, string>) => startGitnexus(env))

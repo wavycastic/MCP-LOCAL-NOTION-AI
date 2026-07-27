@@ -13,9 +13,13 @@ const args = isWin
   : ["gitnexus", "mcp", "--http", "--host", "127.0.0.1", "--port", String(TARGET_PORT), "--auth-token", AUTH_TOKEN];
 
 const gitnexus = spawn(cmd, args, {
-  stdio: "inherit",
-  shell: false
+  stdio: ["ignore", "pipe", "pipe"],
+  shell: false,
+  windowsHide: true
 });
+
+gitnexus.stdout?.on("data", (d) => process.stdout.write(d));
+gitnexus.stderr?.on("data", (d) => process.stderr.write(d));
 
 gitnexus.on("exit", (code) => {
   console.error(`gitnexus process exited with code ${code}`);

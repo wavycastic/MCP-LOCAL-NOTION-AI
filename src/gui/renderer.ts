@@ -15,6 +15,7 @@ type Config = {
 type Api = {
 	state: () => Promise<State>
 	config: (env: Record<string, string>) => Promise<Config>
+	saveConfig?: (cfg: Partial<Pick<Config, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken">>) => Promise<unknown>
 	startMcp: (env: Record<string, string>) => Promise<State>
 	stopMcp: () => Promise<State>
 	startGitnexus: (env: Record<string, string>) => Promise<State>
@@ -109,11 +110,11 @@ function appendLog(line: { at: string; source: string; text: string } | string) 
 async function refreshConfig() {
 	const c = await window.localRepoMcp.config(env())
 	if (els.mcpLocal) els.mcpLocal.value = c.mcpLocalUrl
-	els.mcpPublic.value = localStorage.getItem("mcpPublicUrl") || c.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp"
+	els.mcpPublic.value = c.mcpPublicUrl || localStorage.getItem("mcpPublicUrl") || "https://mcp.wavycastic.id.vn/mcp"
 	if (els.gitLocal) els.gitLocal.value = c.gitnexusLocalUrl
-	els.gitPublic.value = localStorage.getItem("gitnexusPublicUrl") || c.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp"
-	const mcpToken = localStorage.getItem("mcpToken") || c.mcpToken || ""
-	const gitToken = localStorage.getItem("gitnexusToken") || c.gitnexusToken
+	els.gitPublic.value = c.gitnexusPublicUrl || localStorage.getItem("gitnexusPublicUrl") || "https://gitnexus.wavycastic.id.vn/mcp"
+	const mcpToken = c.mcpToken || localStorage.getItem("mcpToken") || ""
+	const gitToken = c.gitnexusToken || localStorage.getItem("gitnexusToken") || ""
 	els.mcpToken.value = mcpToken
 	els.gitToken.value = gitToken
 	;(document.getElementById("MCP_TOKEN") as HTMLInputElement).value = mcpToken
@@ -128,12 +129,19 @@ function randomToken() {
 }
 
 function saveCustomValues() {
-	localStorage.setItem("mcpPublicUrl", els.mcpPublic.value.trim())
-	localStorage.setItem("gitnexusPublicUrl", els.gitPublic.value.trim())
-	localStorage.setItem("mcpToken", els.mcpToken.value.trim())
-	localStorage.setItem("gitnexusToken", els.gitToken.value.trim())
+	const cfg = {
+		mcpPublicUrl: els.mcpPublic.value.trim(),
+		gitnexusPublicUrl: els.gitPublic.value.trim(),
+		mcpToken: els.mcpToken.value.trim(),
+		gitnexusToken: els.gitToken.value.trim(),
+	}
+	localStorage.setItem("mcpPublicUrl", cfg.mcpPublicUrl)
+	localStorage.setItem("gitnexusPublicUrl", cfg.gitnexusPublicUrl)
+	localStorage.setItem("mcpToken", cfg.mcpToken)
+	localStorage.setItem("gitnexusToken", cfg.gitnexusToken)
 	;(document.getElementById("MCP_TOKEN") as HTMLInputElement).value = els.mcpToken.value.trim()
 	;(document.getElementById("GITNEXUS_TOKEN") as HTMLInputElement).value = els.gitToken.value.trim()
+	void window.localRepoMcp.saveConfig?.(cfg)
 }
 
 // 2-Tab Navigation Switching
