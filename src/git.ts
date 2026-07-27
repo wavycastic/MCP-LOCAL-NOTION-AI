@@ -18,6 +18,7 @@ export async function currentBranch(repo: Repo): Promise<string> {
  * se bao khong ghi duoc trong khi edit_file van ghi binh thuong.
  */
 export function branchAllowed(repo: Repo, branch: string): boolean {
+	if (repo.source === "system") return true
 	const p = repo.branchPrefix.trim()
 	if (p === "" || p === "*") return true
 	return branch.startsWith(p)
@@ -30,6 +31,7 @@ export function branchAllowed(repo: Repo, branch: string): boolean {
  */
 export async function assertWritableBranch(repo: Repo): Promise<string> {
 	assertWritableRepo(repo)
+	if (repo.source === "system") return "(system)"
 	const b = await currentBranch(repo)
 	if (!branchAllowed(repo, b)) {
 		throw new Error(

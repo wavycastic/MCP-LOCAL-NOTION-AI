@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, join } from "node:path"
 import {
 	AUTO_DISCOVERED_WRITE,
+	ALLOW_FULL_ACCESS,
 	DEFAULT_BRANCH_PREFIX,
 	DEFAULT_REINDEX_CMD,
 	REPOS_CONFIG,
@@ -21,7 +22,7 @@ export type Repo = {
 	typecheck?: string[]
 	reindex: string[]
 	toolchain: string
-	source: "config" | "discovered"
+	source: "config" | "discovered" | "system"
 }
 
 type RepoEntry = {
@@ -141,6 +142,18 @@ export function allRepos(): Repo[] {
 		}
 	}
 
+	if (ALLOW_FULL_ACCESS) {
+		byRoot.set("__system__", {
+			name: "system",
+			root: "__FULL_ACCESS__",
+			write: true,
+			branchPrefix: "*",
+			reindex: DEFAULT_REINDEX_CMD,
+			toolchain: "system",
+			source: "system",
+		})
+	}
+
 	const repos = [...byRoot.values()].sort((a, b) => a.name.localeCompare(b.name))
 	assertUniqueNames(repos) // truoc khi cache: cau hinh sai thi khong duoc "dinh" lai
 	cache = { at: Date.now(), repos }
@@ -165,6 +178,8 @@ export function resolveRepo(name?: string): Repo {
 
 	const wanted = name?.trim()
 	if (!wanted) {
+		const system = repos.find((r) => r.source === "system")
+		if (system) return system
 		if (repos.length === 1) return repos[0]
 		throw new RepoError(
 			`can chi ro tham so "repo". Dang co: ${repos.map((r) => r.name).join(", ")}`,
@@ -181,6 +196,7 @@ export function resolveRepo(name?: string): Repo {
 
 /** Chan ghi vao repo chi-doc (mac dinh cua moi repo). */
 export function assertWritableRepo(repo: Repo): void {
+	if (repo.source === "system") return
 	if (!repo.write)
 		throw new RepoError(
 			`repo "${repo.name}" la chi-doc. Dat "write": true cho no trong ${REPOS_CONFIG} neu muon cho ghi`,

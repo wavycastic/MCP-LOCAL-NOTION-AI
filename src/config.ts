@@ -59,6 +59,12 @@ export const REPOS_CONFIG = resolve(process.env.REPOS_CONFIG ?? "repos.json")
 /** Repo tu dong tim thay co duoc ghi khong. Mac dinh khong. */
 export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
 
+/**
+ * Che do toan quyen may cuc bo. Khi bat, them repo ao "system" cho phep dung
+ * duong dan tuyet doi (C:\..., E:\...) va chay terminal o bat ky thu muc nao.
+ */
+export const ALLOW_FULL_ACCESS = bool("ALLOW_FULL_ACCESS", true)
+
 /** Prefix branch cho phep ghi, dung khi repo khong khai bao rieng. */
 export const DEFAULT_BRANCH_PREFIX = process.env.DEFAULT_BRANCH_PREFIX ?? "agent/"
 

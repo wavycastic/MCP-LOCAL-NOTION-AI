@@ -1,6 +1,8 @@
 import { existsSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
 
+const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
+
 const DENY: RegExp[] = [
 	/(^|\/)\.env(\..*)?$/,
 	/(^|\/)\.git\/(config|credentials)$/,
@@ -35,6 +37,7 @@ function resolveInRoot(root: string, rel: string): string {
 	if (typeof rel !== "string" || rel.length === 0)
 		throw new PathDenied("path required")
 	if (rel.includes("\0")) throw new PathDenied("invalid path")
+	if (root === FULL_ACCESS_ROOT) return isAbsolute(rel) ? resolve(rel) : resolve(process.cwd(), rel)
 	if (isAbsolute(rel)) throw new PathDenied("path must be relative to repo root")
 
 	const target = resolve(root, rel)
@@ -74,6 +77,11 @@ export function safeResolveNew(root: string, rel: string): string {
 /** Nhu safeResolve nhung cho phep chinh repo root ("." hoac ""). Chi dung cho doc thu muc. */
 export function safeResolveDir(root: string, rel?: string): string {
 	const r = (rel ?? ".").trim()
+	if (root === FULL_ACCESS_ROOT) {
+		const abs = r === "" || r === "." || r === "./" ? process.cwd() : resolveInRoot(root, r)
+		if (!existsSync(abs)) throw new PathDenied(`not found: ${r}`)
+		return abs
+	}
 	if (r === "" || r === "." || r === "./") return root
 	return safeResolve(root, r)
 }
