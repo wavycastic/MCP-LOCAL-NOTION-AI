@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 type ProcState = { running: boolean; pid: number | null; startedAt: string | null }
 type DashboardConfig = {
@@ -27,7 +27,9 @@ function rootDir(): string {
 }
 
 function repoRoot(): string {
-	return app.isPackaged ? process.cwd() : process.cwd()
+	if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR
+	if (app.isPackaged) return dirname(process.execPath)
+	return process.cwd()
 }
 
 function readEnvValue(key: string): string | null {

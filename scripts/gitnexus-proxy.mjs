@@ -6,8 +6,15 @@ const PROXY_PORT = 3000;
 const AUTH_TOKEN = process.argv[2] || process.env.AUTH_TOKEN || "f6e87a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f";
 
 console.log(`Starting gitnexus on port ${TARGET_PORT}...`);
-const gitnexus = spawn("gitnexus", ["mcp", "--http", "--host", "127.0.0.1", "--port", String(TARGET_PORT), "--auth-token", AUTH_TOKEN], {
-  stdio: "inherit"
+const isWin = process.platform === "win32";
+const cmd = isWin ? (process.env.ComSpec || "cmd.exe") : "npx";
+const args = isWin 
+  ? ["/c", "npx", "gitnexus", "mcp", "--http", "--host", "127.0.0.1", "--port", String(TARGET_PORT), "--auth-token", AUTH_TOKEN]
+  : ["gitnexus", "mcp", "--http", "--host", "127.0.0.1", "--port", String(TARGET_PORT), "--auth-token", AUTH_TOKEN];
+
+const gitnexus = spawn(cmd, args, {
+  stdio: "inherit",
+  shell: false
 });
 
 gitnexus.on("exit", (code) => {
