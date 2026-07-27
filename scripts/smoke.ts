@@ -69,6 +69,7 @@ process.env.MCP_TOKEN = "smoke-token"
 process.env.WORKSPACE_ROOT = workspace
 process.env.REPOS_CONFIG = reposConfig
 process.env.ALLOW_PUSH = "false"
+process.env.ALLOW_TERMINAL = "true"
 process.env.AUTO_DISCOVERED_WRITE = "false"
 process.env.MAX_READ_BYTES = "5000" // ha tran cho de test, moi file thuc te deu nho hon
 process.env.MAX_WRITE_BYTES = "5000"
@@ -87,6 +88,11 @@ const { gitRestore } = await import("../src/tools/gitRestore.js")
 const { gitStatus } = await import("../src/tools/gitStatus.js")
 const { gitPush } = await import("../src/tools/gitPush.js")
 const { runBuild, runTests } = await import("../src/tools/runTests.js")
+const { gitBranch } = await import("../src/tools/gitBranch.js")
+const { gitStash } = await import("../src/tools/gitStash.js")
+const { runLint } = await import("../src/tools/runLint.js")
+const { runTypecheck } = await import("../src/tools/runTypecheck.js")
+const { terminal } = await import("../src/tools/terminal.js")
 const { jobStatus } = await import("../src/tools/jobStatus.js")
 
 let pass = 0
@@ -327,6 +333,29 @@ ok("commit duoc ca file bi xoa", cm3.exit_code === 0, JSON.stringify(cm3))
 ok("tree sach sau commit xoa", (await gitStatus({ repo: "demo" })).dirty === false)
 
 await denies("git_push bi tat mac dinh", () => gitPush({ repo: "demo" }), "bi tat")
+
+// —— git_branch & git_stash ——
+console.log("\ngit_branch & git_stash")
+const brList = await gitBranch({ repo: "demo" })
+ok("git_branch liet ke branch", Array.isArray(brList.branches) && brList.branches.length > 0)
+const brCreate = await gitBranch({ repo: "demo", name: "agent/feature-smoke", create: true })
+ok("git_branch tao branch moi", brCreate.created === true && brCreate.branch === "agent/feature-smoke")
+await denies(
+	"git_branch tu choi tao branch sai prefix",
+	() => gitBranch({ repo: "demo", name: "bad/prefix-branch", create: true }),
+	"branchPrefix",
+)
+
+const stList = await gitStash({ repo: "demo", action: "list" })
+ok("git_stash list tra ve mang", Array.isArray(stList.stashes))
+
+// —— terminal ——
+console.log("\nterminal")
+const tm1: any = await terminal({ repo: "demo", command: "echo terminal_works", env: { TEST_ENV: "hello" } })
+ok("terminal chay lenh thanh cong", tm1.exit_code === 0 && String(tm1.output).includes("terminal_works"), JSON.stringify(tm1))
+const tmBg: any = await terminal({ repo: "demo", command: "echo terminal_bg", background: true })
+ok("terminal background tra job_id ngay", typeof tmBg.job_id === "string", JSON.stringify(tmBg))
+
 
 // —— Build & test dong bo ——
 console.log("\nbuild & test")

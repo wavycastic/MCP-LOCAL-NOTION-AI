@@ -5,12 +5,15 @@ import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
 import { createFile, createFileSchema } from "./createFile.js"
 import { editFile, editFileSchema } from "./editFile.js"
+import { ghPr, ghPrSchema } from "./ghPr.js"
 import { gitBlame, gitBlameSchema } from "./gitBlame.js"
+import { gitBranch, gitBranchSchema } from "./gitBranch.js"
 import { gitCommit, gitCommitSchema } from "./gitCommit.js"
 import { gitDiff, gitDiffSchema } from "./gitDiff.js"
 import { gitLog, gitLogSchema } from "./gitLog.js"
 import { gitPush, gitPushSchema } from "./gitPush.js"
 import { gitRestore, gitRestoreSchema } from "./gitRestore.js"
+import { gitStash, gitStashSchema } from "./gitStash.js"
 import { gitStatus, gitStatusSchema } from "./gitStatus.js"
 import { jobStatus, jobStatusSchema } from "./jobStatus.js"
 import { listDir, listDirSchema } from "./listDir.js"
@@ -21,6 +24,9 @@ import { reindex, reindexSchema } from "./reindex.js"
 import { removeFile, removeFileSchema } from "./removeFile.js"
 import { ripgrep, ripgrepSchema } from "./ripgrep.js"
 import { runBuild, runBuildSchema, runTests, runTestsSchema } from "./runTests.js"
+import { runLint, runLintSchema } from "./runLint.js"
+import { runTypecheck, runTypecheckSchema } from "./runTypecheck.js"
+import { terminal, terminalSchema } from "./terminal.js"
 
 type Handler = (args: any) => Promise<unknown>
 
@@ -104,18 +110,24 @@ export function registerAll(s: McpServer) {
 	reg(s, "remove_file", "Xoa file da track bang git rm. Chi dung khi da chac khong con reference nao (kiem tra bang code graph hoac ripgrep truoc).", removeFileSchema, removeFile, { destructive: true })
 	reg(s, "git_restore", "Duong lui: tra tung FILE cu the ve trang thai da commit (HEAD), bo thay doi chua commit cua chinh no. Dung khi sua sai. Chi nhan duong dan file cu the, khong nhan \".\" hay wildcard.", gitRestoreSchema, gitRestore, { destructive: true })
 
-	// —— Verify ——
+	// —— Verify & Quality ——
 	reg(s, "run_build", "Chay lenh build cua repo (khai bao trong repos.json, hoac doan tu toolchain). Khong nhan argv tuy y. Repo lon nen dat background=true roi hoi bang job_status.", runBuildSchema, runBuild)
 	reg(s, "run_tests", "Chay lenh test cua repo. Tuy chon filter (chi toolchain dotnet). Repo lon nen dat background=true roi hoi bang job_status.", runTestsSchema, runTests)
-	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests hoac reindex tu dong sau commit tao ra. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
+	reg(s, "run_lint", "Chay linter cua repo (eslint, dotnet format, cargo clippy, ruff, golangci-lint). Tuy chon fix=true de auto-fix neu toolchain ho tro.", runLintSchema, runLint)
+	reg(s, "run_typecheck", "Chay kiem tra kieu (tsc --noEmit, mypy, cargo check, dotnet build --no-incremental).", runTypecheckSchema, runTypecheck)
+	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests/run_lint/run_typecheck hoac reindex tu dong sau commit tao ra. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
 
-	// —— Git ——
+	// —— Git & PR ——
 	reg(s, "git_status", "git status --porcelain + branch hien tai + repo nay co dang ghi duoc khong.", gitStatusSchema, gitStatus, { readOnly: true })
+	reg(s, "git_branch", "Liet ke, tao hoac chuyen sang branch moi (`git checkout -b` / `git checkout`). Enforces branchPrefix khi tao branch.", gitBranchSchema, gitBranch)
+	reg(s, "git_stash", "Quan ly stash working tree (push / pop / list).", gitStashSchema, gitStash)
 	reg(s, "git_diff", "Xem diff working tree hoac staged, tuy chon gioi han theo path hoac chi --stat.", gitDiffSchema, gitDiff, { readOnly: true })
 	reg(s, "git_log", "Lich su commit gan day, tuy chon gioi han theo path va kem --stat.", gitLogSchema, gitLog, { readOnly: true })
 	reg(s, "git_blame", "git blame 1 file, tuy chon gioi han theo khoang dong. Dung de biet ai/commit nao doi dong code.", gitBlameSchema, gitBlame, { readOnly: true })
 	reg(s, "git_commit", "Commit trong mot repo. Mac dinh CHI stage nhung file ma cac tool nay da sua, khong dung den thay doi nguoi dung tu lam do trong cung repo — dat all=true neu that su muon gom het. Tu choi commit neu co file thuoc deny-list (.env, key, secrets/) dang cho. Commit xong tu chay lai index code graph o background va tra ve reindex_job. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
 	reg(s, "git_push", "Push branch hien tai len remote (--set-upstream, khong bao gio --force). Yeu cau working tree sach va ALLOW_PUSH=true.", gitPushSchema, gitPush)
+	reg(s, "gh_pr", "Quan ly GitHub Pull Request qua GitHub CLI (`gh pr status`, `gh pr list`, `gh pr view`, `gh pr create`).", ghPrSchema, ghPr)
+	reg(s, "terminal", "Chay lenh terminal theo chuoi command qua shell cua OS. CHI DUNG KHI ban that su muon agent co quyen chay lenh bat ky tren may nay. Mac dinh tool bi tat bang ALLOW_TERMINAL=false. Dung list_repos de chon repo lam cwd. Can vo cung can than: lenh co the doc secret, xoa file, hay thay doi he thong.", terminalSchema, terminal)
 
 	// —— Code graph ——
 	reg(s, "reindex", "Chay lai lenh index code graph cua repo (mac dinh: npx gitnexus analyze). git_commit da tu goi viec nay, nen chi can dung tay khi sua file ma CHUA commit va muon query graph ngay.", reindexSchema, reindex)
