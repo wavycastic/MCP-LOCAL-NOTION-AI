@@ -1,4 +1,5 @@
-import { run } from "./exec.js"
+import type { ChildProcess } from "node:child_process"
+import { killTree, run } from "./exec.js"
 import { withLock } from "./lock.js"
 
 export type JobStatus = "queued" | "running" | "done" | "failed"
@@ -16,11 +17,20 @@ export type Job = {
 	error?: string
 }
 
-const jobs = new Map<string, Job>()
+/** Job + nhung thu chi ben trong module nay can biet. */
+type Rec = {
+	job: Job
+	/** Co gia tri tu luc spawn den luc ket thuc — duong duy nhat de giet giua duong. */
+	child?: ChildProcess
+	/** Resolve khi job ket thuc (ke ca that bai). Khong bao gio reject. */
+	done: Promise<void>
+}
+
+const jobs = new Map<string, Rec>()
 const MAX_JOBS = 50
 let seq = 0
 
-function isFinished(j: Job): boolean {
+export function isJobFinished(j: Job): boolean {
 	return j.status === "done" || j.status === "failed"
 }
 
@@ -34,9 +44,9 @@ function isFinished(j: Job): boolean {
  */
 function prune() {
 	if (jobs.size <= MAX_JOBS) return
-	for (const [id, j] of jobs) {
+	for (const [id, rec] of jobs) {
 		if (jobs.size <= MAX_JOBS) return
-		if (isFinished(j)) jobs.delete(id)
+		if (isJobFinished(rec.job)) jobs.delete(id)
 	}
 }
 
@@ -64,16 +74,24 @@ export function startJob(
 		status: "queued",
 		started_at: new Date().toISOString(),
 	}
-	jobs.set(id, job)
+
+	const rec: Rec = { job, done: Promise.resolve() }
+	jobs.set(id, rec)
 	prune()
 
-	void withLock(
+	rec.done = withLock(
 		cwd,
 		`job:${id}`,
 		async () => {
 			job.status = "running"
 			try {
-				const r = await run(argv, { cwd, timeoutMs })
+				const r = await run(argv, {
+					cwd,
+					timeoutMs,
+					onSpawn: (p) => {
+						rec.child = p
+					},
+				})
 				job.exit_code = r.code
 				job.timed_out = r.timedOut
 				job.output = (r.stdout + "\n" + r.stderr).slice(-60_000)
@@ -82,20 +100,76 @@ export function startJob(
 				job.status = "failed"
 				job.error = e instanceof Error ? e.message : String(e)
 			} finally {
+				rec.child = undefined
 				job.ended_at = new Date().toISOString()
 			}
 		},
 		0,
+	).then(
+		() => undefined,
+		// Loi cua lock (khong phai cua lenh) cung phai lam job ket thuc, khong thi
+		// nguoi cho se cho vinh vien.
+		(e: unknown) => {
+			if (!isJobFinished(job)) {
+				job.status = "failed"
+				job.error = e instanceof Error ? e.message : String(e)
+				job.ended_at = new Date().toISOString()
+			}
+		},
 	)
 
 	return job
 }
 
+/**
+ * Cho job xong toi da ms. Tra ve job neu da ket thuc, undefined neu con chay.
+ *
+ * Dung cho run_build/run_tests kieu dong bo: viec ngan thi tra ket qua ngay trong
+ * cung mot lan goi tool, viec dai thi tu dong lui ve background thay vi giu HTTP
+ * request treo cho den luc client ngat.
+ */
+export async function waitForJob(id: string, ms: number): Promise<Job | undefined> {
+	const rec = jobs.get(id)
+	if (!rec) return undefined
+	if (isJobFinished(rec.job)) return rec.job
+
+	let timer: NodeJS.Timeout | undefined
+	const timeout = new Promise<void>((res) => {
+		timer = setTimeout(res, ms)
+	})
+	try {
+		await Promise.race([rec.done, timeout])
+	} finally {
+		if (timer) clearTimeout(timer)
+	}
+	return isJobFinished(rec.job) ? rec.job : undefined
+}
+
+/**
+ * Giet moi job chua ket thuc. Goi luc tat server: khong lam viec nay thi
+ * `dotnet build` hay `npx gitnexus analyze` van chay tiep sau khi server chet,
+ * khoa file trong repo va khong con ai theo doi duoc no.
+ */
+export function killRunningJobs(): number {
+	let killed = 0
+	for (const rec of jobs.values()) {
+		if (isJobFinished(rec.job)) continue
+		if (rec.child) {
+			killTree(rec.child)
+			killed++
+		}
+		rec.job.status = "failed"
+		rec.job.error = "server dang tat nen job bi huy"
+		rec.job.ended_at = new Date().toISOString()
+	}
+	return killed
+}
+
 export function getJob(id: string): Job | undefined {
-	return jobs.get(id)
+	return jobs.get(id)?.job
 }
 
 export function listJobs(repoName?: string): Job[] {
-	const all = [...jobs.values()]
+	const all = [...jobs.values()].map((r) => r.job)
 	return repoName ? all.filter((j) => j.repo === repoName) : all
 }
