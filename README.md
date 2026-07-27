@@ -21,20 +21,29 @@ lam vay, graph se cu hon code va agent tra loi sai ma van rat tu tin.
 
 ## Cai dat
 
-*Yêu cầu Node.js >= 20.6.0 (sử dụng tính năng `--env-file=.env` mặc định).*
+*Yeu cau Node.js >= 20.6.0 (dung `--env-file=.env`).*
 
 ```bash
 npm install
-git add package-lock.json && git commit -m "chore: lockfile"   # lam 1 lan
 cp .env.example .env            # dat MCP_TOKEN dai, ngau nhien
 cp repos.example.json repos.json
 npm run build && npm start      # hoac: npm run dev
 curl localhost:8765/health
-bash scripts/tunnel.sh           # lay URL https de dan vao Notion
+bash scripts/tunnel.sh          # lay URL https de dan vao Notion
 ```
 
 Trong Notion: them MCP server, URL `https://<tunnel>/mcp`, header
 `Authorization: Bearer <MCP_TOKEN>`.
+
+### Docker Desktop
+
+```bash
+docker compose up -d --build
+```
+
+Can `repos.docker.json` dung duong dan TRONG container (`/projects/...`, khong phai
+`E:/Projects/...`) va `HOST=0.0.0.0`. Anh `node:22-alpine` khong co `dotnet`, nen
+muon `run_build` cho repo .NET thi chay server truc tiep tren Windows.
 
 ## Khai bao repo
 
@@ -45,10 +54,14 @@ Trong Notion: them MCP server, URL `https://<tunnel>/mcp`, header
   "defaults": { "branchPrefix": "agent/", "reindex": ["npx", "gitnexus", "analyze"] },
   "repos": [
     { "name": "cv-aut", "path": "C:/code/CV-AUT", "write": true },
-    { "name": "tool-x", "path": "C:/code/tool-x" }
+    { "name": "tool-x", "path": "C:/code/tool-x", "write": true, "branchPrefix": "*" }
   ]
 }
 ```
+
+`branchPrefix` gioi han branch nao duoc ghi. Dat `"*"` (hoac chuoi rong) de cho ghi
+tren MOI branch, ke ca `main`/`master`. Dat cho tung repo, hoac cho tat ca trong
+`defaults`.
 
 Dat `WORKSPACE_ROOT` thi moi subdir co `.git` cung duoc tu dong tim thay — nhung
 CHI DOC (tru khi bat `AUTO_DISCOVERED_WRITE`).
@@ -62,14 +75,14 @@ go, python, maven).
 | --- | --- |
 | `list_repos` | Liet ke repo, quyen ghi, toolchain |
 | `read_file` | Doc file theo dong. Chan binary va file > `MAX_READ_BYTES` |
-| `list_dir` | Liet ke thu muc (bo qua `.git`, `node_modules`, `bin`, `obj`…) |
+| `list_dir` | Liet ke thu muc. Bo qua `.git`, `node_modules`, `bin`, `obj`… va thu bi `.gitignore` loai |
 | `ripgrep` | Tim chuoi/regex. `all_repos: true` de tim xuyen repo |
 | `create_file` | Chi tao file moi, khong ghi de |
-| `edit_file` | Thay doan text (`old_str` phai khop chinh xac) |
+| `edit_file` | Thay doan text (`old_str` khop chinh xac; CRLF/LF tu khop) |
 | `move_file` | `git mv`, giu blame |
 | `remove_file` | `git rm`, chi file da track |
 | `git_restore` | Duong lui: tra TUNG file ve HEAD. Khong nhan `.` hay wildcard |
-| `run_build` / `run_tests` | Chay lenh cua repo. `background: true` cho viec dai |
+| `run_build` / `run_tests` | Chay lenh cua repo. Cho toi `SYNC_WAIT_MS` roi tu lui ve background |
 | `job_status` | Theo doi job background |
 | `git_status` / `git_diff` / `git_log` / `git_blame` | Doc trang thai va history |
 | `git_commit` | Commit. Mac dinh CHI file cac tool nay da sua |
@@ -82,12 +95,14 @@ go, python, maven).
 - **Chroot theo repo**: path phai tuong doi, khong ra ngoai repo root, khong cheo repo.
 - **Deny-list ca 2 chieu**: `.env*`, `.git/config`, `.git/credentials`, `*.pem|key|pfx`,
   `secrets/`, `id_rsa*`, `.npmrc` — khong doc duoc, va cung khong commit duoc.
-- **Branch guard**: chi ghi khi dang o branch `agent/*`. Khong bao gio ghi tren `main`.
+- **Branch guard**: chi ghi khi branch khop `branchPrefix` cua repo (mac dinh `agent/`).
+  Dat `"*"` neu muon cho ghi ca tren `main`.
 - **Chi ghi repo duoc cap quyen** trong `repos.json`.
 - **`git_commit` chi stage file agent da sua** — khong keo theo viec ban dang lam do.
   Muon gom het thi phai noi ro `all: true`.
 - **Mutex theo repo**: cac tool co side effect tren cung repo chay tuan tu. Cho qua
   `LOCK_WAIT_MS` (120s) thi bao loi ro thay vi treo im lang.
+- **Tat server thi giet luon job dang chay**, khong de lai tien trinh `dotnet build` mo coi.
 - **`audit.log`**: ghi moi tool call, da xoa noi dung file va cac truong dai. Tu rotate o 5MB.
 
 ## Env
@@ -96,31 +111,34 @@ go, python, maven).
 | --- | --- |
 | `MCP_TOKEN` | bat buoc |
 | `PORT` | `8765` |
+| `HOST` | `127.0.0.1` (Docker: `0.0.0.0`) |
 | `REPOS_CONFIG` | `repos.json` |
 | `WORKSPACE_ROOT` | khong |
 | `AUTO_DISCOVERED_WRITE` | `false` |
-| `DEFAULT_BRANCH_PREFIX` | `agent/` |
+| `DEFAULT_BRANCH_PREFIX` | `agent/` (dat `*` cho moi branch) |
 | `ALLOW_PUSH` | `false` |
 | `MAX_READ_BYTES` | `2000000` |
 | `MAX_WRITE_BYTES` | `1000000` |
 | `LOCK_WAIT_MS` | `120000` |
+| `SYNC_WAIT_MS` | `60000` |
 | `EXEC_TIMEOUT_MS` | `900000` |
 | `DEFAULT_REINDEX_CMD` | `npx gitnexus analyze` |
+
+`DEFAULT_BRANCH_PREFIX` chi ap dung khi `repos.json` khong khai bao `branchPrefix`
+(o tung repo hoac trong `defaults`) — file cau hinh thang hon env.
 
 ## Phat trien
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm run smoke       # tao 2 repo git tam, chay het cac tool, 54 assertion
+npm run smoke       # tao 2 repo git tam, chay het cac tool
 ```
 
 `npm run smoke` khong can repo that va khong cham repo cua ban. CI chay ca hai.
 
 ## Viec con lai
 
-- Chua chay lan nao tren may that — con thieu `package-lock.json`.
 - Chua co test cho tang HTTP (bearer auth, `/mcp`) va cho `git_push` that.
+- Smoke chua co case: file CRLF, `new_str` chua `$&`, commit khi khong co gi thay doi.
 - `exec.ts` khong giu `SSH_AUTH_SOCK` → push qua SSH se fail; dung HTTPS + credential helper.
-- Chua chan header `Host`/`Origin` (DNS rebinding).
-- `list_dir`/`ripgrep` chua ton trong `.gitignore`.
 - Quick tunnel doi URL moi lan restart → nen chuyen sang named tunnel + Cloudflare Access.
