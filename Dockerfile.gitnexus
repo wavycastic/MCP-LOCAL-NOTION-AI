@@ -3,6 +3,9 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y openssl libssl3 git ripgrep && rm -rf /var/lib/apt/lists/*
 RUN npm install -g gitnexus@latest
 
+WORKDIR /app
+COPY scripts/gitnexus-proxy.mjs /app/gitnexus-proxy.mjs
+
 EXPOSE 3000
 
-CMD ["gitnexus", "mcp", "--http", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["node", "/app/gitnexus-proxy.mjs"]

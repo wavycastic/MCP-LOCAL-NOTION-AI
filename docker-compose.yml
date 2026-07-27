@@ -20,7 +20,6 @@ services:
       dockerfile: Dockerfile.gitnexus
     container_name: gitnexus-mcp-server
     restart: unless-stopped
-    command: gitnexus mcp --http --host 0.0.0.0 --port 3000 --auth-token f6e87a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f
     ports:
       - "3000:3000"
     volumes:
