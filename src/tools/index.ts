@@ -93,9 +93,9 @@ export function registerAll(s: McpServer) {
 	reg(s, "list_repos", "Liet ke cac repo server dang phuc vu, kem quyen ghi, branch prefix va toolchain. GOI TOOL NAY TRUOC TIEN: moi tool khac nhan tham so `repo` la ten lay tu day.", { refresh: z.boolean().optional().describe("Bo qua cache 10s, quet lai") }, listRepos, { readOnly: true })
 
 	// —— Doc ——
-	reg(s, "read_file", "Doc file trong mot repo, phan trang theo dong. Dung cho moi file khong nam trong code graph (markup, project file, CI yaml, config).", readFileSchema, readFile, { readOnly: true })
+	reg(s, "read_file", "Doc file trong mot repo, phan trang theo dong. Dung cho moi file khong nam trong code graph (markup, project file, CI yaml, config). Tu choi file binary va file qua lon.", readFileSchema, readFile, { readOnly: true })
 	reg(s, "list_dir", "Liet ke file/thu muc trong repo. Bo qua .git, node_modules, bin, obj, dist, target, .venv.", listDirSchema, listDir, { readOnly: true })
-	reg(s, "ripgrep", "Tim regex trong mot repo, hoac trong TAT CA repo voi all_repos=true. Dung all_repos truoc khi doi/xoa symbol dung chung. Tu lui ve git grep neu may chua cai ripgrep.", ripgrepSchema, ripgrep, { readOnly: true })
+	reg(s, "ripgrep", "Tim CHUOI VAN BAN tho bang regex trong mot repo, hoac trong TAT CA repo voi all_repos=true. Dung cho thu khong nam trong code graph: yaml, project file, config, chuoi log. Cau hoi ve symbol (ai goi ai, sua day thi vo dau) thi hoi code graph, dung tool nay se sot. Tu lui ve git grep neu may chua cai ripgrep.", ripgrepSchema, ripgrep, { readOnly: true })
 
 	// —— Sua file (chi repo co write: true) ——
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace. old_str phai khop chinh xac va duy nhat. Chi tren repo co quyen ghi va dang o branch dung prefix.", editFileSchema, editFile)
@@ -107,16 +107,16 @@ export function registerAll(s: McpServer) {
 	// —— Verify ——
 	reg(s, "run_build", "Chay lenh build cua repo (khai bao trong repos.json, hoac doan tu toolchain). Khong nhan argv tuy y. Repo lon nen dat background=true roi hoi bang job_status.", runBuildSchema, runBuild)
 	reg(s, "run_tests", "Chay lenh test cua repo. Tuy chon filter (chi toolchain dotnet). Repo lon nen dat background=true roi hoi bang job_status.", runTestsSchema, runTests)
-	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests tao ra voi background=true. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
+	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests hoac reindex tu dong sau commit tao ra. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
 
 	// —— Git ——
 	reg(s, "git_status", "git status --porcelain + branch hien tai + repo nay co dang ghi duoc khong.", gitStatusSchema, gitStatus, { readOnly: true })
 	reg(s, "git_diff", "Xem diff working tree hoac staged, tuy chon gioi han theo path hoac chi --stat.", gitDiffSchema, gitDiff, { readOnly: true })
 	reg(s, "git_log", "Lich su commit gan day, tuy chon gioi han theo path va kem --stat.", gitLogSchema, gitLog, { readOnly: true })
 	reg(s, "git_blame", "git blame 1 file, tuy chon gioi han theo khoang dong. Dung de biet ai/commit nao doi dong code.", gitBlameSchema, gitBlame, { readOnly: true })
-	reg(s, "git_commit", "git add -A roi commit trong mot repo. Tu choi commit neu co file thuoc deny-list (.env, key, secrets/) dang cho. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
+	reg(s, "git_commit", "Commit trong mot repo. Mac dinh CHI stage nhung file ma cac tool nay da sua, khong dung den thay doi nguoi dung tu lam do trong cung repo — dat all=true neu that su muon gom het. Tu choi commit neu co file thuoc deny-list (.env, key, secrets/) dang cho. Commit xong tu chay lai index code graph o background va tra ve reindex_job. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
 	reg(s, "git_push", "Push branch hien tai len remote (--set-upstream, khong bao gio --force). Yeu cau working tree sach va ALLOW_PUSH=true.", gitPushSchema, gitPush)
 
 	// —— Code graph ——
-	reg(s, "reindex", "Chay lai lenh index code graph cua repo (mac dinh: npx gitnexus analyze). PHAI goi sau moi loat sua file, truoc khi query lai graph.", reindexSchema, reindex)
+	reg(s, "reindex", "Chay lai lenh index code graph cua repo (mac dinh: npx gitnexus analyze). git_commit da tu goi viec nay, nen chi can dung tay khi sua file ma CHUA commit va muon query graph ngay.", reindexSchema, reindex)
 }
