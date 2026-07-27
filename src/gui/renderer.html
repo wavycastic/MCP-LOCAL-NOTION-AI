@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="vi">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>local-repo-mcp</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+		}
+		* { box-sizing: border-box; }
+		
+		/* Hide native scrollbars completely */
+		::-webkit-scrollbar {
+			display: none;
+		}
+
+		body {
+			margin: 0;
+			background: #000000;
+			color: #f5f5f5;
+			font-size: 11px;
+			overflow: hidden;
+			height: 100vh;
+		}
+		h2 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #ffffff; }
+		main {
+			height: 100vh;
+			padding: 6px;
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			box-sizing: border-box;
+		}
+
+		/* 2 Navigation Tabs */
+		.nav-tabs {
+			display: flex;
+			gap: 4px;
+			flex-shrink: 0;
+		}
+		.nav-tab {
+			flex: 1;
+			height: 24px;
+			font-size: 10px;
+			font-weight: 600;
+			background: #141414;
+			color: #888888;
+			border: 1px solid #222222;
+			border-radius: 4px;
+			cursor: pointer;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			transition: all 0.15s ease;
+		}
+		.nav-tab:hover {
+			background: #1f1f1f;
+			color: #d4d4d4;
+		}
+		.nav-tab.active {
+			background: #1e293b;
+			color: #ffffff;
+			border-color: #3b82f6;
+		}
+
+		.view-container {
+			flex: 1;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
+		}
+		.view {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			height: 100%;
+		}
+		.view.hidden {
+			display: none;
+		}
+
+		.card {
+			background: #0d0d0d;
+			border: 1px solid #222222;
+			border-radius: 5px;
+			padding: 6px 8px;
+			min-width: 0;
+		}
+		.form-group { margin-bottom: 3px; }
+		label { display: block; font-size: 8.5px; color: #888888; margin-bottom: 1px; font-weight: 600; text-transform: uppercase; }
+		.input-group { display: flex; gap: 3px; align-items: center; }
+		input[type="text"],
+		input[type="password"],
+		input:not([type]) {
+			flex: 1;
+			width: 100%;
+			box-sizing: border-box;
+			padding: 3px 6px;
+			height: 23px;
+			border-radius: 4px;
+			border: 1px solid #262626;
+			background: #000000;
+			color: #f5f5f5;
+			font-size: 10px;
+			font-family: Consolas, Monaco, monospace;
+		}
+		input:focus { border-color: #3b82f6; outline: none; }
+		input[readonly] { background: #0a0a0a; color: #888888; }
+		button {
+			border: 0;
+			border-radius: 4px;
+			padding: 3px 7px;
+			height: 23px;
+			color: white;
+			cursor: pointer;
+			font-weight: 600;
+			font-size: 9.5px;
+			white-space: nowrap;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+		}
+		button.secondary { background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a; }
+		button.secondary:hover { background: #262626; color: #ffffff; }
+		.global-actions { display: flex; gap: 4px; margin-top: auto; }
+		.global-actions button { flex: 1; height: 26px; font-size: 10px; background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a; }
+		.global-actions button:hover { background: #262626; color: #ffffff; }
+		
+		pre#log {
+			margin: 0;
+			flex: 1;
+			overflow-y: auto;
+			white-space: pre-wrap;
+			word-break: break-all;
+			font: 9.5px/1.4 Consolas, Monaco, monospace;
+			background: #000000;
+			border: 1px solid #222222;
+			border-radius: 5px;
+			padding: 6px;
+			color: #d4d4d4;
+		}
+		.log-line { display: block; margin-bottom: 1px; }
+		.log-time { color: #666666; font-size: 8.5px; margin-right: 4px; }
+		.log-src-mcp { color: #60a5fa; font-weight: 600; }
+		.log-src-gitnexus { color: #c084fc; font-weight: 600; }
+		.log-src-sys { color: #4ade80; font-weight: 600; }
+	</style>
+</head>
+<body>
+	<!-- Hidden binding elements for script compatibility -->
+	<div style="display:none;">
+		<span id="mode"></span>
+		<span id="serviceState"></span>
+		<span id="status"></span>
+		<input id="mcpLocal" />
+		<button id="copy-mcp"></button>
+		<input id="gitLocal" />
+		<button id="copy-git"></button>
+		<button id="toggle-mcp"></button>
+		<button id="toggle-git"></button>
+		<button id="save-custom"></button>
+		<button id="clear"></button>
+		<button id="show-mcp-token"></button>
+		<button id="show-git-token"></button>
+		<input id="PORT" value="8765" />
+		<input id="HOST" value="127.0.0.1" />
+		<input id="ALLOW_TERMINAL" value="true" />
+		<input id="GITNEXUS_PROXY_PORT" value="3000" />
+		<input id="MCP_TOKEN" />
+		<input id="GITNEXUS_TOKEN" />
+	</div>
+	<main>
+		<!-- 2 Navigation Tabs -->
+		<div class="nav-tabs">
+			<button class="nav-tab active" id="tab-btn-config">Config</button>
+			<button class="nav-tab" id="tab-btn-log">Logs</button>
+		</div>
+
+		<div class="view-container">
+			<!-- View 1: Config -->
+			<div class="view" id="view-config">
+				<!-- Local MCP Card -->
+				<section class="card">
+					<h2>Local MCP</h2>
+					<div class="form-group">
+						<label>Public URL</label>
+						<div class="input-group">
+							<input id="mcpPublic" placeholder="https://your-domain/mcp" />
+							<button class="secondary" id="copy-mcp-public">Copy</button>
+						</div>
+					</div>
+					<div class="form-group">
+						<label>Token</label>
+						<div class="input-group">
+							<input id="mcpToken" type="text" />
+							<button class="secondary" id="gen-mcp-token" title="Generate token">Gen</button>
+							<button class="secondary" id="copy-mcp-token">Copy</button>
+						</div>
+					</div>
+				</section>
+
+				<!-- GitNexus MCP Card -->
+				<section class="card">
+					<h2>GitNexus MCP</h2>
+					<div class="form-group">
+						<label>Public URL</label>
+						<div class="input-group">
+							<input id="gitPublic" placeholder="https://your-gitnexus-domain/mcp" />
+							<button class="secondary" id="copy-git-public">Copy</button>
+						</div>
+					</div>
+					<div class="form-group">
+						<label>Token</label>
+						<div class="input-group">
+							<input id="gitToken" type="text" />
+							<button class="secondary" id="gen-git-token" title="Generate token">Gen</button>
+							<button class="secondary" id="copy-git-token">Copy</button>
+						</div>
+					</div>
+				</section>
+
+				<!-- Global Start / Stop Buttons -->
+				<div class="global-actions">
+					<button class="secondary" id="start-all">Start All</button>
+					<button class="secondary" id="stop-all">Stop All</button>
+				</div>
+			</div>
+
+			<!-- View 2: Logs -->
+			<div class="view hidden" id="view-log">
+				<pre id="log"></pre>
+			</div>
+		</div>
+	</main>
+	<script src="renderer.js" type="module"></script>
+</body>
+</html>
