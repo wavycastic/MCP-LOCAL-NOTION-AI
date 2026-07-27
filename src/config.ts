@@ -23,6 +23,26 @@ function optRealpath(name: string): string | null {
 	}
 }
 
+/**
+ * Tach mot dong lenh thanh argv, co ton trong "..." va '...'.
+ *
+ * Truoc day chi .split(" "): dat
+ *   DEFAULT_REINDEX_CMD="C:/Program Files/nodejs/npx.cmd gitnexus analyze"
+ * se thanh ["C:/Program", "Files/nodejs/npx.cmd", ...] va bao "khong tim thay
+ * lenh" — ma duong dan co khoang trang la chuyen thuong ngay tren Windows.
+ */
+function argvFromEnv(name: string, dflt: string): string[] {
+	const raw = (process.env[name] ?? dflt).trim()
+	const out: string[] = []
+	const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+	let m: RegExpExecArray | null
+	while ((m = re.exec(raw)) !== null) {
+		out.push(m[1] ?? m[2] ?? m[3] ?? "")
+	}
+	if (out.length === 0) throw new Error(`${name} rong — can it nhat mot lenh`)
+	return out
+}
+
 export const MCP_TOKEN = req("MCP_TOKEN")
 export const PORT = Number(process.env.PORT ?? 8765)
 
@@ -57,11 +77,16 @@ export const MAX_READ_BYTES = Number(process.env.MAX_READ_BYTES ?? 2_000_000)
  */
 export const LOCK_WAIT_MS = Number(process.env.LOCK_WAIT_MS ?? 120_000)
 
+/**
+ * run_build/run_tests kieu dong bo chi giu HTTP request toi day, sau do tu lui ve
+ * background va tra job_id. Phai NHO hon nhieu so voi EXEC_TIMEOUT_MS: client MCP
+ * va tunnel se ngat truoc khi mot ban build 15 phut kip xong.
+ */
+export const SYNC_WAIT_MS = Number(process.env.SYNC_WAIT_MS ?? 60_000)
+
 /** Kill switch toan cuc cho git_push. Repo van phai tu bat write. */
 export const ALLOW_PUSH = bool("ALLOW_PUSH", false)
 export const GIT_REMOTE = process.env.GIT_REMOTE ?? "origin"
 
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
-export const DEFAULT_REINDEX_CMD = (
-	process.env.DEFAULT_REINDEX_CMD ?? "npx gitnexus analyze"
-).split(" ")
+export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")
