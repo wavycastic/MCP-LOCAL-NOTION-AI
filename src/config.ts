@@ -45,6 +45,7 @@ function argvFromEnv(name: string, dflt: string): string[] {
 
 export const MCP_TOKEN = req("MCP_TOKEN")
 export const PORT = Number(process.env.PORT ?? 8765)
+export const HOST = process.env.HOST ?? "127.0.0.1"
 
 /**
  * Thu muc chua nhieu repo (moi subdir co .git la mot repo). Tuy chon.

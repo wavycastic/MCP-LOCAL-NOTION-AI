@@ -1,0 +1,26 @@
+name: local-repo-mcp
+
+services:
+  mcp-server:
+    build: .
+    container_name: local-repo-mcp-server
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - HOST=0.0.0.0
+    volumes:
+      - E:/Projects:/projects
+      - ./.env:/app/.env
+      - ./repos.docker.json:/app/repos.json
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: local-repo-mcp-tunnel
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    depends_on:
+      - mcp-server
+    volumes:
+      - ./config.docker.yml:/etc/cloudflared/config.yml
+      - C:\Users\Administrator\.cloudflared\40b930f7-f760-4327-b19d-cb71604a6b0e.json:/etc/cloudflared/credentials.json:ro

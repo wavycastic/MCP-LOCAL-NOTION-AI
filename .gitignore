@@ -6,3 +6,6 @@ audit.log.1
 
 # Chua duong dan tren may ban — moi nguoi mot ban khac nhau.
 repos.json
+config.yml
+repos.docker.json
+config.docker.yml

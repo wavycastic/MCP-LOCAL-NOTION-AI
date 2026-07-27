@@ -4,6 +4,7 @@ import express from "express"
 import { timingSafeEqual } from "node:crypto"
 import {
 	ALLOW_PUSH,
+	HOST,
 	MCP_TOKEN,
 	PORT,
 	REPOS_CONFIG,
@@ -76,8 +77,8 @@ app.all("/mcp", async (req, res) => {
 	}
 })
 
-const httpServer = app.listen(PORT, "127.0.0.1", () => {
-	console.log(`local-repo-mcp on http://127.0.0.1:${PORT}/mcp`)
+const httpServer = app.listen(PORT, HOST, () => {
+	console.log(`local-repo-mcp on http://${HOST}:${PORT}/mcp`)
 	console.log(`repos config:   ${REPOS_CONFIG}`)
 	console.log(`workspace root: ${WORKSPACE_ROOT ?? "(khong dat)"}`)
 	console.log(`push enabled:   ${ALLOW_PUSH}`)
