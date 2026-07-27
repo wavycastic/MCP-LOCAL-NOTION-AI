@@ -42,8 +42,8 @@ docker compose up -d --build
 ```
 
 Can `repos.docker.json` dung duong dan TRONG container (`/projects/...`, khong phai
-`E:/Projects/...`) va `HOST=0.0.0.0`. Anh `node:22-alpine` khong co `dotnet`, nen
-muon `run_build` cho repo .NET thi chay server truc tiep tren Windows.
+`E:/Projects/...`) va `HOST=0.0.0.0`. Docker image dung `node:22-slim`, co san
+Git, ripgrep va .NET SDK 10 de build/test cac repo .NET nhu CV-AUT.
 
 ## Khai bao repo
 
@@ -69,6 +69,16 @@ CHI DOC (tru khi bat `AUTO_DISCOVERED_WRITE`).
 Build/test/reindex khong khai bao thi tu doan theo toolchain (dotnet, npm, cargo,
 go, python, maven).
 
+### Che do Full Access
+
+`ALLOW_FULL_ACCESS=true` (mac dinh hien tai) them repo ao `system`. Repo nay cho phep
+cac tool file nhan duong dan tuyet doi (`C:\...`, `E:\...`) va cho `terminal` chay
+o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
+`repos.json`, chroot theo repo hay deny-list duong dan.
+
+Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
+`repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
+
 ## 26 tool
 
 | Tool | Viec |
@@ -90,23 +100,30 @@ go, python, maven).
 | `git_commit` | Commit. Mac dinh CHI file cac tool nay da sua |
 | `git_push` | Mac dinh bi tat (`ALLOW_PUSH`) |
 | `gh_pr` | Quan ly GitHub Pull Request qua GitHub CLI (`gh pr status`, `create`, `list`, `view`) |
-| `terminal` | Chay lenh shell tùy y (Mac dinh bi tat `ALLOW_TERMINAL=false`) |
+| `terminal` | Chay lenh shell tuy y (`ALLOW_TERMINAL`, mac dinh hien tai `true`) |
 | `reindex` | Chay lai index code graph thu cong |
 
 ## Rao an toan
 
 - **Token**: moi request tru `/health` phai co bearer token dung (so sanh timing-safe).
-- **Chroot theo repo**: path phai tuong doi, khong ra ngoai repo root, khong cheo repo.
-- **Deny-list ca 2 chieu**: `.env*`, `.git/config`, `.git/credentials`, `*.pem|key|pfx`,
-  `secrets/`, `id_rsa*`, `.npmrc` — khong doc duoc, va cung khong commit duoc.
-- **Branch guard**: chi ghi khi branch khop `branchPrefix` cua repo (mac dinh `agent/`).
-  Dat `"*"` neu muon cho ghi ca tren `main`.
-- **Chi ghi repo duoc cap quyen** trong `repos.json`.
+- **Che do gioi han repo** (`ALLOW_FULL_ACCESS=false`): path phai nam trong repo,
+  khong thoat root qua `..`/symlink va khong doc cheo repo.
+- **Deny-list ca 2 chieu trong che do gioi han repo**: `.env*`, `.git/config`,
+  `.git/credentials`, `*.pem|key|pfx`, `secrets/`, `id_rsa*`, `.npmrc` — khong
+  doc duoc va cung khong commit duoc.
+- **Full Access** (`ALLOW_FULL_ACCESS=true`): chu dong bo qua chroot va deny-list
+  duong dan cho repo `system`. Chi bat khi chap nhan cho agent truy cap toan may.
+- **Terminal**: `ALLOW_TERMINAL=true` cho phep chay lenh shell tuy y; lenh co the
+  doc secret, truy cap mang, sua hoac xoa du lieu. Tat bien nay neu khong can.
+- **Branch guard**: repo thong thuong chi ghi khi branch khop `branchPrefix`
+  (mac dinh `agent/`). Dat `"*"` neu muon cho ghi ca tren `main`.
+- **Repo thong thuong chi duoc ghi khi co `write: true`** trong `repos.json`;
+  quy tac nay khong gioi han repo `system` cua Full Access.
 - **`git_commit` chi stage file agent da sua** — khong keo theo viec ban dang lam do.
   Muon gom het thi phai noi ro `all: true`.
 - **Mutex theo repo**: cac tool co side effect tren cung repo chay tuan tu. Cho qua
   `LOCK_WAIT_MS` (120s) thi bao loi ro thay vi treo im lang.
-- **Tat server thi giet luon job dang chay**, khong de lai tien trinh `dotnet build` mo coi.
+- **Tat server thi giet luon job dang chay**, khong de lai tien trinh build mo coi.
 - **`audit.log`**: ghi moi tool call, da xoa noi dung file va cac truong dai. Tu rotate o 5MB.
 
 ## Env
@@ -119,8 +136,11 @@ go, python, maven).
 | `REPOS_CONFIG` | `repos.json` |
 | `WORKSPACE_ROOT` | khong |
 | `AUTO_DISCOVERED_WRITE` | `false` |
+| `ALLOW_FULL_ACCESS` | `true` (them repo toan quyen `system`) |
 | `DEFAULT_BRANCH_PREFIX` | `agent/` (dat `*` cho moi branch) |
 | `ALLOW_PUSH` | `false` |
+| `GIT_REMOTE` | `origin` |
+| `ALLOW_TERMINAL` | `true` |
 | `MAX_READ_BYTES` | `2000000` |
 | `MAX_WRITE_BYTES` | `1000000` |
 | `LOCK_WAIT_MS` | `120000` |
@@ -145,4 +165,4 @@ npm run smoke       # tao 2 repo git tam, chay het cac tool
 - Chua co test cho tang HTTP (bearer auth, `/mcp`) va cho `git_push` that.
 - Smoke chua co case: file CRLF, `new_str` chua `$&`, commit khi khong co gi thay doi.
 - `exec.ts` khong giu `SSH_AUTH_SOCK` → push qua SSH se fail; dung HTTPS + credential helper.
-- Quick tunnel doi URL moi lan restart → nen chuyen sang named tunnel + Cloudflare Access.
+- `scripts/tunnel.sh` dung named tunnel khi co `config.yml`; neu khong co thi lui ve Quick Tunnel va URL se doi sau moi lan restart. Nen dung named tunnel + Cloudflare Access cho moi truong on dinh.
