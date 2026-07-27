@@ -65,6 +65,7 @@ export function startJob(
 	cwd: string,
 	argv: string[],
 	timeoutMs?: number,
+	extraEnv?: Record<string, string>,
 ): Job {
 	const id = `job-${++seq}`
 	const job: Job = {
@@ -88,6 +89,7 @@ export function startJob(
 				const r = await run(argv, {
 					cwd,
 					timeoutMs,
+					env: extraEnv,
 					onSpawn: (p) => {
 						rec.child = p
 					},

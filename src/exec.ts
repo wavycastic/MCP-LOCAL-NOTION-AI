@@ -79,20 +79,21 @@ const WIN_ENV_PASSTHROUGH = [
 	"PROCESSOR_ARCHITECTURE",
 ]
 
-function childEnv(): NodeJS.ProcessEnv {
+function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
 		PATH: process.env.PATH,
 		LANG: "C",
 		DOTNET_CLI_TELEMETRY_OPTOUT: "1",
 		DOTNET_NOLOGO: "1",
 		GIT_TERMINAL_PROMPT: "0", // khong treo cho nhap credential
+		...(extraEnv ?? {}),
 	}
 	if (process.env.HOME) env.HOME = process.env.HOME
 
 	if (process.platform === "win32") {
 		for (const k of WIN_ENV_PASSTHROUGH) {
 			const v = process.env[k]
-			if (v !== undefined) env[k] = v
+			if (v !== undefined && env[k] === undefined) env[k] = v
 		}
 		if (!env.HOME && env.USERPROFILE) env.HOME = env.USERPROFILE
 	}
@@ -131,7 +132,7 @@ export function killTree(p: ChildProcess): void {
  */
 export function run(
 	argv: string[],
-	opts: { cwd: string; timeoutMs?: number; onSpawn?: (p: ChildProcess) => void },
+	opts: { cwd: string; timeoutMs?: number; onSpawn?: (p: ChildProcess) => void; env?: Record<string, string> },
 ): Promise<ExecResult> {
 	const [rawCmd, ...rawArgs] = argv
 	if (!rawCmd) throw new Error("argv rong")
@@ -163,7 +164,7 @@ export function run(
 		const p = spawn(cmd, args, {
 			cwd: opts.cwd,
 			shell: false, // BAT BUOC
-			env: childEnv(),
+			env: childEnv(opts.env),
 		})
 		opts.onSpawn?.(p)
 
