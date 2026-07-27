@@ -23,8 +23,12 @@ function tokenOk(header?: string): boolean {
 const app = express()
 app.use(express.json({ limit: "8mb" }))
 
-// Health check dat TRUOC auth: tunnel/uptime probe khong can token.
-// Khong tiet lo ten repo hay duong dan.
+/**
+ * Health check dat TRUOC auth: tunnel/uptime probe khong can token. Vi vay bat ky
+ * ai biet URL tunnel deu doc duoc — chi tra so dem, KHONG tra ten repo, duong dan,
+ * hay ten tool dang chay. (Truoc day tra thang lockState() nen lo duong dan tuyet
+ * doi kieu E:/Projects/... ra ngoai.)
+ */
 app.get("/health", (_req, res) => {
 	let repoCount: number | null = null
 	try {
@@ -34,7 +38,7 @@ app.get("/health", (_req, res) => {
 		ok: true,
 		uptime_s: Math.round(process.uptime()),
 		repos: repoCount,
-		locks: lockState(),
+		busy_repos: lockState().length,
 	})
 })
 
@@ -45,6 +49,11 @@ app.use((req, res, next) => {
 		return
 	}
 	next()
+})
+
+/** Chi tiet lock (co duong dan) chi cho nguoi da co token. */
+app.get("/locks", (_req, res) => {
+	res.json({ locks: lockState() })
 })
 
 app.all("/mcp", async (req, res) => {
