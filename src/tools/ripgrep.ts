@@ -28,6 +28,36 @@ type Args = {
 const MAX_REPOS = 20
 const MAX_CHARS_PER_REPO = 40_000
 
+/**
+ * Deny-list o dang glob. Moi tool doc file deu di qua security/paths.ts, nhung
+ * grep khong nhan path — no quet ca cay. Thieu doan nay thi
+ * `{ glob: "*.pem", pattern: "." }` in ra thang noi dung private key, tuc la
+ * duong vong qua toan bo deny-list.
+ *
+ * rg: glob sau ghi de glob truoc, nen phai day xuong SAU glob cua nguoi goi.
+ */
+const DENY_GLOBS = [
+	"!**/.env",
+	"!**/.env.*",
+	"!**/*.pem",
+	"!**/*.key",
+	"!**/*.pfx",
+	"!**/*.p12",
+	"!**/*.jks",
+	"!**/secret/**",
+	"!**/secrets/**",
+	"!**/id_rsa*",
+	"!**/id_dsa*",
+	"!**/id_ecdsa*",
+	"!**/id_ed25519*",
+	"!**/.npmrc",
+	"!**/.git/config",
+	"!**/.git/credentials",
+]
+
+/** Cung deny-list nhung theo cu phap pathspec cua git, dung cho nhanh git grep. */
+const DENY_PATHSPECS = DENY_GLOBS.map((g) => `:(exclude)${g.slice(1)}`)
+
 type Hit = {
 	repo: string
 	engine: "ripgrep" | "git-grep"
@@ -55,6 +85,7 @@ async function grepOne(repo: Repo, a: Args): Promise<Hit> {
 	const rg = ["rg", "--line-number", "--no-heading", "--color", "never"]
 	if (a.ignore_case) rg.push("-i")
 	if (a.glob) rg.push("--glob", a.glob)
+	for (const g of DENY_GLOBS) rg.push("--glob", g)
 	rg.push("--max-count", String(a.max_count ?? 100))
 	rg.push("--regexp", a.pattern) // --regexp: pattern khong bi hieu thanh flag
 	rg.push(".")
@@ -69,7 +100,7 @@ async function grepOne(repo: Repo, a: Args): Promise<Hit> {
 		const gg = ["git", "grep", "--line-number", "--no-color"]
 		if (a.ignore_case) gg.push("-i")
 		gg.push("-e", a.pattern)
-		if (a.glob) gg.push("--", a.glob)
+		gg.push("--", ...(a.glob ? [a.glob] : []), ...DENY_PATHSPECS)
 		const r = await run(gg, { cwd: repo.root, timeoutMs: 60_000 })
 		return hit(
 			repo,
