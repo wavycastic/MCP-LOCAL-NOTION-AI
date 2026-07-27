@@ -17,6 +17,8 @@ export type Repo = {
 	branchPrefix: string
 	build?: string[]
 	test?: string[]
+	lint?: string[]
+	typecheck?: string[]
 	reindex: string[]
 	toolchain: string
 	source: "config" | "discovered"
@@ -29,6 +31,8 @@ type RepoEntry = {
 	branchPrefix?: string
 	build?: string[]
 	test?: string[]
+	lint?: string[]
+	typecheck?: string[]
 	reindex?: string[]
 }
 
@@ -65,6 +69,8 @@ function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["sour
 	for (const [k, v] of [
 		["build", entry.build],
 		["test", entry.test],
+		["lint", entry.lint],
+		["typecheck", entry.typecheck],
 		["reindex", entry.reindex],
 	] as const) {
 		if (v !== undefined && !isArgv(v))
@@ -78,6 +84,8 @@ function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["sour
 		branchPrefix: entry.branchPrefix ?? dflt?.branchPrefix ?? DEFAULT_BRANCH_PREFIX,
 		build: entry.build ?? tc.build,
 		test: entry.test ?? tc.test,
+		lint: entry.lint ?? tc.lint,
+		typecheck: entry.typecheck ?? tc.typecheck,
 		reindex: entry.reindex ?? dflt?.reindex ?? DEFAULT_REINDEX_CMD,
 		toolchain: tc.kind,
 		source,
