@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import {
 	AUTO_DISCOVERED_WRITE,
 	DEFAULT_BRANCH_PREFIX,
@@ -57,7 +57,9 @@ function isArgv(v: unknown): v is string[] {
 
 function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["source"]): Repo {
 	const root = realpathSync(entry.path)
-	const name = entry.name ?? root.split("/").filter(Boolean).pop() ?? root
+	// basename, khong phai split("/"): tren Windows realpath tra ve "E:\Projects\CV-AUT"
+	// nen split("/") khong cat duoc gi va ten repo thanh ca duong dan.
+	const name = entry.name ?? basename(root) ?? root
 	const tc = detectToolchain(root)
 
 	for (const [k, v] of [
