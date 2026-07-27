@@ -1,9 +1,10 @@
 FROM node:22-slim
 
-# Install git, ripgrep, curl + .NET dependencies (glibc via Debian slim)
+# Install git, ripgrep, curl + .NET + OpenCvSharp native dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates ripgrep \
     libicu-dev libssl3 libgcc-s1 zlib1g \
+    libgomp1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install .NET SDK 10.0 (CV-AUT targets .NET 10)
