@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { spawn } from "node:child_process"
 import { EXEC_TIMEOUT_MS, MAX_OUTPUT } from "./config.js"
 
@@ -8,15 +10,41 @@ export type ExecResult = {
 	timedOut: boolean
 }
 
+function resolveCmd(cmd: string): string {
+	if (process.platform !== "win32") return cmd
+	if (cmd.endsWith(".exe") || cmd.endsWith(".cmd") || cmd.endsWith(".bat")) return cmd
+
+	const pathDirs = (process.env.PATH ?? "").split(";").filter(Boolean)
+	for (const ext of [".cmd", ".bat", ".exe"]) {
+		if (cmd.includes("/") || cmd.includes("\\")) {
+			if (existsSync(cmd + ext)) return cmd + ext
+		} else {
+			for (const dir of pathDirs) {
+				if (existsSync(join(dir, cmd + ext))) return cmd + ext
+			}
+		}
+	}
+	return cmd
+}
+
 /**
  * Chay argv co dinh, khong qua shell, trong cwd la root cua MOT repo.
  * cwd la tham so bat buoc: multi-repo nen khong con "thu muc mac dinh" nao dung.
  */
+const WIN_BUILTINS = new Set(["echo", "dir", "copy", "del", "type", "move", "mkdir", "rmdir", "cls"])
+
 export function run(
 	argv: string[],
 	opts: { cwd: string; timeoutMs?: number },
 ): Promise<ExecResult> {
-	const [cmd, ...args] = argv
+	const [rawCmd, ...rawArgs] = argv
+	const resolved = resolveCmd(rawCmd)
+	const isBatchOrBuiltin =
+		process.platform === "win32" &&
+		(resolved.endsWith(".cmd") || resolved.endsWith(".bat") || WIN_BUILTINS.has(rawCmd.toLowerCase()))
+	const cmd = isBatchOrBuiltin ? (process.env.ComSpec || "cmd.exe") : resolved
+	const args = isBatchOrBuiltin ? ["/d", "/s", "/c", rawCmd, ...rawArgs] : rawArgs
+
 	return new Promise((res, rej) => {
 		const p = spawn(cmd, args, {
 			cwd: opts.cwd,

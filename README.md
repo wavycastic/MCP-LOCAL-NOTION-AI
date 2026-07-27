@@ -21,6 +21,8 @@ lam vay, graph se cu hon code va agent tra loi sai ma van rat tu tin.
 
 ## Cai dat
 
+*Yêu cầu Node.js >= 20.6.0 (sử dụng tính năng `--env-file=.env` mặc định).*
+
 ```bash
 npm install
 git add package-lock.json && git commit -m "chore: lockfile"   # lam 1 lan
