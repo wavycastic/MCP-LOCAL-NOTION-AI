@@ -27,9 +27,20 @@ function rootDir(): string {
 }
 
 function repoRoot(): string {
-	if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR
-	if (app.isPackaged) return dirname(process.execPath)
-	return process.cwd()
+	const candidates = [
+		process.env.PORTABLE_EXECUTABLE_DIR,
+		app.isPackaged ? dirname(dirname(process.execPath)) : null,
+		app.isPackaged ? dirname(process.execPath) : null,
+		process.cwd(),
+		app.getAppPath(),
+	].filter((d): d is string => !!d && typeof d === "string")
+
+	for (const dir of candidates) {
+		if (existsSync(join(dir, "repos.json")) || existsSync(join(dir, ".env"))) {
+			return dir
+		}
+	}
+	return app.isPackaged ? dirname(process.execPath) : process.cwd()
 }
 
 function readEnvValue(key: string): string | null {
