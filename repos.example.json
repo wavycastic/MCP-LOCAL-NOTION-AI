@@ -14,7 +14,8 @@
     {
       "name": "my-web-app",
       "path": "/home/you/mirrors/my-web-app",
-      "write": true
+      "write": true,
+      "branchPrefix": "*"
     },
     {
       "name": "avalonia",
