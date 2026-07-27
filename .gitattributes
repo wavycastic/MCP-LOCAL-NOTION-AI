@@ -1,0 +1,22 @@
+# Repo nay bi sua tu ca hai phia: Windows (editor cua nguoi dung) va Linux
+# (container Docker, GitHub API). Khong chot kieu xuong dong thi ca 41 file bao
+# "modified" du khong ai doi mot ky tu nao — va moi commit sau do keo theo ca file
+# bi viet lai, lam diff 3 dong phinh thanh 200 dong.
+#
+# text=auto: luon chuan hoa ve LF khi commit.
+# eol=lf:    working tree cung dung LF, ke ca tren Windows.
+* text=auto eol=lf
+
+# File cua Windows thi phai giu CRLF, neu khong cmd.exe doc sai.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Nhi phan: khong dien giai gi.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.dll binary
+*.exe binary
