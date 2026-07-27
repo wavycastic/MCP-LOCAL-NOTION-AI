@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
-import { currentBranch } from "../git.js"
+import { branchAllowed, currentBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 
 export const gitStatusSchema = {
@@ -17,7 +17,10 @@ export async function gitStatus(a: { repo?: string }) {
 	return {
 		repo: repo.name,
 		branch,
-		writable: repo.write && branch.startsWith(repo.branchPrefix),
+		// branchAllowed, khong phai startsWith tu lam: neu hai cho tinh khac nhau thi
+		// git_status bao "khong ghi duoc" trong khi edit_file van ghi duoc — kieu mau
+		// thuan nay lam agent tuong minh bi chan roi di lam duong khac.
+		writable: repo.write && branchAllowed(repo, branch),
 		exit_code: r.code,
 		dirty: r.stdout.split("\n").some((l) => l.trim() && !l.startsWith("##")),
 		status: r.stdout.slice(0, 40_000),
