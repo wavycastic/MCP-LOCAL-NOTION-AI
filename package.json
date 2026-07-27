@@ -18,16 +18,18 @@
   "build": {
     "appId": "local.repo.mcp",
     "productName": "local-repo-mcp",
+    "asar": false,
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
+      "!dist/win-unpacked/**/*",
       "scripts/gitnexus-proxy.mjs",
       "package.json"
     ],
     "win": {
-      "target": "portable"
+      "target": ["dir", "zip", "nsis"]
     }
   },
   "dependencies": {

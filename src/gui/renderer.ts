@@ -109,9 +109,9 @@ function appendLog(line: { at: string; source: string; text: string } | string) 
 async function refreshConfig() {
 	const c = await window.localRepoMcp.config(env())
 	if (els.mcpLocal) els.mcpLocal.value = c.mcpLocalUrl
-	els.mcpPublic.value = localStorage.getItem("mcpPublicUrl") || c.mcpPublicUrl || ""
+	els.mcpPublic.value = localStorage.getItem("mcpPublicUrl") || c.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp"
 	if (els.gitLocal) els.gitLocal.value = c.gitnexusLocalUrl
-	els.gitPublic.value = localStorage.getItem("gitnexusPublicUrl") || c.gitnexusPublicUrl || ""
+	els.gitPublic.value = localStorage.getItem("gitnexusPublicUrl") || c.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp"
 	const mcpToken = localStorage.getItem("mcpToken") || c.mcpToken || ""
 	const gitToken = localStorage.getItem("gitnexusToken") || c.gitnexusToken
 	els.mcpToken.value = mcpToken

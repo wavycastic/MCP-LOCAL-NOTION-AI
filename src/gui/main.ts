@@ -23,11 +23,11 @@ const procs: Record<"mcp" | "gitnexus", { child: ChildProcessWithoutNullStreams 
 }
 
 function rootDir(): string {
-	return app.isPackaged ? ((process as NodeJS.Process & { resourcesPath: string }).resourcesPath as string) : process.cwd()
+	return app.getAppPath()
 }
 
 function repoRoot(): string {
-	return process.cwd()
+	return app.isPackaged ? process.cwd() : process.cwd()
 }
 
 function readEnvValue(key: string): string | null {
@@ -47,10 +47,10 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || ""
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
-		mcpPublicUrl: null,
+		mcpPublicUrl: "https://mcp.wavycastic.id.vn/mcp",
 		mcpToken: env.MCP_TOKEN || readEnvValue("MCP_TOKEN"),
 		gitnexusLocalUrl: `http://127.0.0.1:${gitPort}/mcp`,
-		gitnexusPublicUrl: null,
+		gitnexusPublicUrl: "https://gitnexus.wavycastic.id.vn/mcp",
 		gitnexusToken: gitToken,
 	}
 }
