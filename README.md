@@ -69,7 +69,7 @@ CHI DOC (tru khi bat `AUTO_DISCOVERED_WRITE`).
 Build/test/reindex khong khai bao thi tu doan theo toolchain (dotnet, npm, cargo,
 go, python, maven).
 
-## 25 tool
+## 26 tool
 
 | Tool | Viec |
 | --- | --- |
@@ -84,7 +84,7 @@ go, python, maven).
 | `git_restore` | Duong lui: tra TUNG file ve HEAD. Khong nhan `.` hay wildcard |
 | `run_build` / `run_tests` | Chay lenh build/test cua repo. Cho toi `SYNC_WAIT_MS` roi tu lui ve background |
 | `run_lint` / `run_typecheck` | Chay linter/typechecker cua repo (`fix=true` de auto-fix neu toolchain ho tro) |
-| `job_status` | Theo doi job background |
+| `job_status` / `kill_job` | Theo doi job background hoac huy/dung ngay mot background job dang chay |
 | `git_status` / `git_diff` / `git_log` / `git_blame` | Doc trang thai va history |
 | `git_branch` / `git_stash` | Liet ke/tao/chuyen branch (`branchPrefix` guard) va quan ly working tree stash |
 | `git_commit` | Commit. Mac dinh CHI file cac tool nay da sua |

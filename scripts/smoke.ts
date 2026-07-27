@@ -94,6 +94,7 @@ const { runLint } = await import("../src/tools/runLint.js")
 const { runTypecheck } = await import("../src/tools/runTypecheck.js")
 const { terminal } = await import("../src/tools/terminal.js")
 const { jobStatus } = await import("../src/tools/jobStatus.js")
+const { killJob } = await import("../src/tools/killJob.js")
 
 let pass = 0
 let fail = 0
@@ -389,6 +390,10 @@ await denies(
 	() => jobStatus({ job_id: "job-9999" }),
 	"khong biet job",
 )
+
+const kjBg: any = await runBuild({ repo: "demo", background: true })
+const kj = await killJob({ repo: "demo", job_id: kjBg.job_id })
+ok("kill_job dung thanh cong background job", kj.status === "failed", JSON.stringify(kj))
 
 // —— Audit log khong duoc chua noi dung file ——
 console.log("\naudit")

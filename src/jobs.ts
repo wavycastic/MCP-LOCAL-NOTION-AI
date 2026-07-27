@@ -171,6 +171,18 @@ export function getJob(id: string): Job | undefined {
 	return jobs.get(id)?.job
 }
 
+export function cancelJob(id: string): boolean {
+	const rec = jobs.get(id)
+	if (!rec || isJobFinished(rec.job)) return false
+	if (rec.child) {
+		killTree(rec.child)
+	}
+	rec.job.status = "failed"
+	rec.job.error = "job bi huy boi kill_job tool"
+	rec.job.ended_at = new Date().toISOString()
+	return true
+}
+
 export function listJobs(repoName?: string): Job[] {
 	const all = [...jobs.values()].map((r) => r.job)
 	return repoName ? all.filter((j) => j.repo === repoName) : all

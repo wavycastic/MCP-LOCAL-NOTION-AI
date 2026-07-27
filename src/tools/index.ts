@@ -16,6 +16,7 @@ import { gitRestore, gitRestoreSchema } from "./gitRestore.js"
 import { gitStash, gitStashSchema } from "./gitStash.js"
 import { gitStatus, gitStatusSchema } from "./gitStatus.js"
 import { jobStatus, jobStatusSchema } from "./jobStatus.js"
+import { killJob, killJobSchema } from "./killJob.js"
 import { listDir, listDirSchema } from "./listDir.js"
 import { listRepos } from "./listRepos.js"
 import { moveFile, moveFileSchema } from "./moveFile.js"
@@ -116,6 +117,7 @@ export function registerAll(s: McpServer) {
 	reg(s, "run_lint", "Chay linter cua repo (eslint, dotnet format, cargo clippy, ruff, golangci-lint). Tuy chon fix=true de auto-fix neu toolchain ho tro.", runLintSchema, runLint)
 	reg(s, "run_typecheck", "Chay kiem tra kieu (tsc --noEmit, mypy, cargo check, dotnet build --no-incremental).", runTypecheckSchema, runTypecheck)
 	reg(s, "job_status", "Hoi ket qua job do run_build/run_tests/run_lint/run_typecheck hoac reindex tu dong sau commit tao ra. Bo trong job_id de xem danh sach job gan day.", jobStatusSchema, jobStatus, { readOnly: true })
+	reg(s, "kill_job", "Huy/dung ngay mot background job dang chay (dieu kien qua job_id, vd: job-1). Dung khi lenh chay qua lau hoac bi lap vo tan.", killJobSchema, killJob, { destructive: true })
 
 	// —— Git & PR ——
 	reg(s, "git_status", "git status --porcelain + branch hien tai + repo nay co dang ghi duoc khong.", gitStatusSchema, gitStatus, { readOnly: true })
