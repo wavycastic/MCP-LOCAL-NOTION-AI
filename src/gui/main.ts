@@ -166,7 +166,7 @@ function startMcp(env: Record<string, string>) {
 	if (!existsSync(entry)) throw new Error(`khong tim thay ${entry}. Chay npm run build truoc`)
 	procs.mcp.startedAt = new Date().toISOString()
 	procs.mcp.child = spawn(process.execPath, [entry], {
-		cwd: rootDir(),
+		cwd: repoRoot(),
 		env: { ...process.env, ...env, ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
 	})
 	wire("mcp")
