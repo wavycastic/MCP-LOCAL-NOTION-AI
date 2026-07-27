@@ -103,8 +103,11 @@ function childEnv(): NodeJS.ProcessEnv {
  * SIGKILL tren Windows chi giet dung tien trinh duoc spawn. Neu do la cmd.exe thi
  * npm/node/dotnet ben duoi song tiep — timeout coi nhu vo nghia. taskkill /T giet
  * ca cay.
+ *
+ * Export ra ngoai vi khong chi timeout can den no: luc tat server cung phai giet
+ * cac job dang chay, khong thi `dotnet build` thanh tien trinh mo coi.
  */
-function killTree(p: ChildProcess): void {
+export function killTree(p: ChildProcess): void {
 	if (process.platform === "win32" && p.pid) {
 		try {
 			const k = spawn("taskkill", ["/pid", String(p.pid), "/T", "/F"], {
@@ -122,10 +125,13 @@ function killTree(p: ChildProcess): void {
 /**
  * Chay argv co dinh, khong qua shell, trong cwd la root cua MOT repo.
  * cwd la tham so bat buoc: multi-repo nen khong con "thu muc mac dinh" nao dung.
+ *
+ * onSpawn: nhan ChildProcess ngay khi tao, de nguoi goi (jobs.ts) con cach giet
+ * no giua duong. Khong co no thi tien trinh chay xong moi biet la ai.
  */
 export function run(
 	argv: string[],
-	opts: { cwd: string; timeoutMs?: number },
+	opts: { cwd: string; timeoutMs?: number; onSpawn?: (p: ChildProcess) => void },
 ): Promise<ExecResult> {
 	const [rawCmd, ...rawArgs] = argv
 	if (!rawCmd) throw new Error("argv rong")
@@ -159,6 +165,8 @@ export function run(
 			shell: false, // BAT BUOC
 			env: childEnv(),
 		})
+		opts.onSpawn?.(p)
+
 		let out = ""
 		let err = ""
 		let timedOut = false
