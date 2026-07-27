@@ -14,6 +14,19 @@ services:
       - ./.env:/app/.env
       - ./repos.docker.json:/app/repos.json
 
+  gitnexus-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.gitnexus
+    container_name: gitnexus-mcp-server
+    restart: unless-stopped
+    command: gitnexus mcp --http --host 0.0.0.0 --port 3000 --auth-token f6e87a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f
+    ports:
+      - "3000:3000"
+    volumes:
+      - E:/Projects:/projects
+      - C:\Users\Administrator\.gitnexus:/root/.gitnexus
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: local-repo-mcp-tunnel
@@ -21,6 +34,7 @@ services:
     command: tunnel --config /etc/cloudflared/config.yml run
     depends_on:
       - mcp-server
+      - gitnexus-server
     volumes:
       - ./config.docker.yml:/etc/cloudflared/config.yml
       - C:\Users\Administrator\.cloudflared\40b930f7-f760-4327-b19d-cb71604a6b0e.json:/etc/cloudflared/credentials.json:ro
