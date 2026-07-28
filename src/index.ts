@@ -11,6 +11,7 @@ import {
 	WORKSPACE_ROOT,
 } from "./config.js"
 import { killRunningJobs } from "./jobs.js"
+import { killAllPtySessions } from "./ptySessions.js"
 import { lockState } from "./lock.js"
 import { allRepos } from "./repos.js"
 import { registerAll } from "./tools/index.js"
@@ -115,7 +116,8 @@ function shutdown(sig: string) {
 	shuttingDown = true
 
 	const killed = killRunningJobs()
-	console.log(`${sig} — shutting down${killed > 0 ? `, da huy ${killed} job dang chay` : ""}`)
+	const killedPty = killAllPtySessions()
+	console.log(`${sig} — shutting down${killed > 0 ? `, da huy ${killed} job dang chay` : ""}${killedPty > 0 ? `, da dong ${killedPty} PTY session` : ""}`)
 
 	httpServer.close(() => process.exit(0))
 

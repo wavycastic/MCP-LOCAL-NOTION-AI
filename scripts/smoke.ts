@@ -100,6 +100,14 @@ const { gitStash } = await import("../src/tools/gitStash.js")
 const { runLint } = await import("../src/tools/runLint.js")
 const { runTypecheck } = await import("../src/tools/runTypecheck.js")
 const { terminal } = await import("../src/tools/terminal.js")
+const {
+	terminalStart,
+	terminalWrite,
+	terminalRead,
+	terminalResize,
+	terminalClose,
+	terminalList,
+} = await import("../src/tools/pty.js")
 const { jobStatus } = await import("../src/tools/jobStatus.js")
 const { killJob } = await import("../src/tools/killJob.js")
 
@@ -761,6 +769,46 @@ process.env.MCP_TOKEN = "secret_mcp_token_value_123"
 const sanitizedTerminalEnv = buildTerminalEnv({ MY_SECRET_KEY: "hidden123", NORMAL_ENV: "ok" })
 ok("terminal env sanitizer loai bo MCP_TOKEN va secret variables", sanitizedTerminalEnv.MCP_TOKEN === undefined && sanitizedTerminalEnv.MY_SECRET_KEY === undefined && sanitizedTerminalEnv.NORMAL_ENV === "ok", JSON.stringify(sanitizedTerminalEnv))
 
+const ptyShell = process.platform === "win32" ? "cmd" : "sh"
+const ptySession = await terminalStart({ repo: "demo", shell: ptyShell, cols: 80, rows: 24 })
+ok("terminal_start mo interactive PTY", ptySession.status === "running" && ptySession.pid > 0, JSON.stringify(ptySession))
+await terminalWrite({ repo: "demo", session_id: ptySession.id, data: "echo PTY_INTERACTIVE_OK\r" })
+
+let ptyRead: any = { output: "", next_cursor: 0, status: "running" }
+let ptyCombined = ""
+for (let i = 0; i < 100 && !ptyCombined.includes("PTY_INTERACTIVE_OK"); i++) {
+	await sleep(20)
+	ptyRead = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: ptyRead.next_cursor })
+	ptyCombined += ptyRead.output
+}
+ok("terminal_write/read tuong tac voi shell dang chay", ptyCombined.includes("PTY_INTERACTIVE_OK"), ptyCombined)
+
+const firstCursor = ptyRead.next_cursor
+await terminalWrite({ repo: "demo", session_id: ptySession.id, data: "echo PTY_INCREMENTAL_OK\r" })
+let incremental = ""
+let nextCursor = firstCursor
+for (let i = 0; i < 100 && !incremental.includes("PTY_INCREMENTAL_OK"); i++) {
+	await sleep(20)
+	const part: any = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: nextCursor })
+	incremental += part.output
+	nextCursor = part.next_cursor
+}
+ok("terminal_read cursor chi tra output moi", incremental.includes("PTY_INCREMENTAL_OK") && !incremental.includes("PTY_INTERACTIVE_OK"), incremental)
+
+const resized = await terminalResize({ repo: "demo", session_id: ptySession.id, cols: 100, rows: 40 })
+ok("terminal_resize cap nhat ConPTY/PTY", resized.cols === 100 && resized.rows === 40, JSON.stringify(resized))
+const ptyListed = await terminalList({ repo: "demo" })
+ok("terminal_list thay session ma khong lo command", ptyListed.sessions.some((s) => s.id === ptySession.id && s.command_length === 0), JSON.stringify(ptyListed))
+await denies(
+	"PTY session bi rang buoc dung repo",
+	() => terminalRead({ repo: "refonly", session_id: ptySession.id }),
+	"thuoc repo",
+)
+const ptyClosed = await terminalClose({ repo: "demo", session_id: ptySession.id })
+ok("terminal_close dung interactive session", ptyClosed.status === "closed" && ptyClosed.already_finished === false, JSON.stringify(ptyClosed))
+const ptyClosedAgain = await terminalClose({ repo: "demo", session_id: ptySession.id })
+ok("terminal_close idempotent", ptyClosedAgain.already_finished === true, JSON.stringify(ptyClosedAgain))
+
 const tmBg: any = await terminal({ repo: "demo", command: "echo terminal_bg", background: true })
 ok("terminal background tra job_id ngay", typeof tmBg.job_id === "string", JSON.stringify(tmBg))
 
@@ -817,6 +865,8 @@ const red = redactForAudit({
 ok("khong ghi noi dung file vao audit", !String(red.content).includes("SECRET_TOKEN"))
 ok("chi ghi do dai", String(red.content).includes("chars"), String(red.content))
 ok("truong ngan van giu nguyen", red.path === "src/a.ts")
+const redPty = redactForAudit({ data: "PASSWORD_TYPED_INTO_PTY" }) as Record<string, unknown>
+ok("audit khong ghi raw PTY input", !String(redPty.data).includes("PASSWORD_TYPED_INTO_PTY"), String(redPty.data))
 
 // —— Cau hinh sai phai sap ngay, khong duoc chay tiep ——
 console.log("\ncau hinh sai")

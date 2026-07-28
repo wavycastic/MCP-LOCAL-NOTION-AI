@@ -19,6 +19,7 @@
     "appId": "local.repo.mcp",
     "productName": "local-repo-mcp",
     "asar": false,
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },
@@ -31,12 +32,17 @@
       ".env.example"
     ],
     "win": {
-      "target": ["dir", "zip", "nsis"]
+      "target": [
+        "dir",
+        "zip",
+        "nsis"
+      ]
     }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
     "express": "^5.1.0",
+    "node-pty": "^1.1.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

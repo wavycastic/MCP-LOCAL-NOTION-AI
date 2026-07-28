@@ -4,6 +4,7 @@ import { buildTerminalEnv } from "../exec.js"
 import { startJob, waitForJob, type Job } from "../jobs.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolveDir } from "../security/paths.js"
+import { buildShellArgv, type ShellKind } from "../terminalShell.js"
 
 export const terminalSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Bo trong neu chi co 1 repo"),
@@ -39,24 +40,11 @@ function finished(repoName: string, job: Job) {
 	}
 }
 
-function buildShellArgv(cmdStr: string, chosenShell?: string): string[] {
-	if (chosenShell) {
-		switch (chosenShell) {
-			case "cmd": return ["cmd", "/c", cmdStr]
-			case "powershell": return ["powershell", "-NoProfile", "-Command", cmdStr]
-			case "pwsh": return ["pwsh", "-NoProfile", "-Command", cmdStr]
-			case "bash": return ["bash", "-c", cmdStr]
-			case "sh": return ["sh", "-c", cmdStr]
-		}
-	}
-	return process.platform === "win32" ? ["cmd", "/c", cmdStr] : ["sh", "-c", cmdStr]
-}
-
 export async function terminal(a: {
 	repo?: string
 	command: string
 	dir?: string
-	shell?: "cmd" | "powershell" | "pwsh" | "bash" | "sh"
+	shell?: ShellKind
 	env?: Record<string, string>
 	background?: boolean
 }) {
@@ -68,6 +56,9 @@ export async function terminal(a: {
 	}
 
 	const repo = resolveRepo(a.repo)
+	if (TERMINAL_MODE === "repo" && repo.source === "system") {
+		throw new Error("TERMINAL_MODE=repo khong cho terminal tren repo system; chi ro mot repo that")
+	}
 	const cwd = safeResolveDir(repo.root, a.dir)
 	const argv = buildShellArgv(a.command, a.shell)
 	const sanitizedEnv = buildTerminalEnv(a.env, TERMINAL_INHERIT_SECRETS)
