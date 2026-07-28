@@ -602,6 +602,14 @@ await denies(
 )
 await assertFullRollbackState("Step 1")
 
+// One parallel temp worker fails after siblings have already created temp files.
+await denies(
+	"apply_patch rollback parallel temp worker failure",
+	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_temp_index: 1 }),
+	"Fault injection test error for temp index 1",
+)
+await assertFullRollbackState("Parallel temp worker")
+
 // Fault during Step 2 (mid-rename)
 await denies(
 	"apply_patch rollback mid-commit Step 2 (mid-rename failure)",

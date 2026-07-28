@@ -80,6 +80,7 @@ export async function applyPatch(a: {
 	expected_files?: Array<{ path: string; sha256: string }>
 	__test_fail_commit?: boolean
 	__test_fail_after_step?: number
+	__test_fail_temp_index?: number
 }) {
 	// Phase A: Parse
 	const parsed = parsePatch(a.patch_text)
@@ -267,8 +268,11 @@ export async function applyPatch(a: {
 
 		// Step 1: prepare temp files concurrently, but keep rename/unlink commit
 		// steps ordered so rollback semantics remain deterministic.
-		const preparedTemps = await mapLimit(plan.changes, 8, async (change) => {
+		const preparedTemps = await mapLimit(plan.changes, 8, async (change, changeIndex) => {
 			try {
+				if (a.__test_fail_temp_index === changeIndex) {
+					throw new Error(`Fault injection test error for temp index ${changeIndex}`)
+				}
 				if (change.type === "delete") {
 					return { ok: true as const, touched: [change.path] }
 				}
@@ -294,14 +298,18 @@ export async function applyPatch(a: {
 				return { ok: false as const, error }
 			}
 		})
+		let preparationError: unknown
 		for (const prepared of preparedTemps) {
 			if (prepared.ok) {
 				if (prepared.temp) writtenTemps.push(prepared.temp)
 				touchedPaths.push(...prepared.touched)
-			} else {
-				throw prepared.error
+			} else if (preparationError === undefined) {
+				preparationError = prepared.error
 			}
 		}
+		// Record every successful temp before throwing so rollback cannot orphan
+		// files created by workers that completed after a sibling failed.
+		if (preparationError !== undefined) throw preparationError
 		if (a.__test_fail_after_step === 1 && writtenTemps.length > 0) {
 			throw new Error("Fault injection test error during Step 1 (temp write)")
 		}
