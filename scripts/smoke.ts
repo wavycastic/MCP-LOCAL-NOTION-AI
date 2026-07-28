@@ -9,7 +9,7 @@
  *   npm run smoke
  */
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -418,53 +418,131 @@ await denies(
 	"bi thao tac nhieu lan",
 )
 
-// Binary file detection test
-const binPath = join(workspace, "demo", "src", "binary.bin")
-writeFileSync(binPath, Buffer.from([0x00, 0x01, 0x02, 0x03]))
+// Expected HEAD SHA tests
+const demoRoot = join(workspace, "demo")
+const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: demoRoot, encoding: "utf8" }).trim()
+
+const apHeadOk = await applyPatch({
+	repo: "demo",
+	expected_head_sha: headSha,
+	patch_text: `*** Begin Patch\n*** Add File: src/head_test.ts\n+export const headOk = true\n*** End Patch`,
+})
+ok("apply_patch expected_head_sha khop thanh cong", apHeadOk.files_changed === 1)
+
 await denies(
-	"apply_patch tu choi file binary",
+	"apply_patch expected_head_sha mismatch bi tu choi",
 	() =>
 		applyPatch({
 			repo: "demo",
-			patch_text: `*** Begin Patch\n*** Update File: src/binary.bin\n@@\n-foo\n+bar\n*** End Patch`,
+			expected_head_sha: "0000000000000000000000000000000000000000",
+			patch_text: `*** Begin Patch\n*** Add File: src/head_bad.ts\n+bad\n*** End Patch`,
 		}),
-	"binary files",
+	"expected_head_sha mismatch",
+)
+
+// Expected Files SHA-256 tests
+const { createHash } = await import("node:crypto")
+const aSha = createHash("sha256").update(readFileSync(join(demoRoot, "src/a.ts"))).digest("hex")
+const apEfOk = await applyPatch({
+	repo: "demo",
+	expected_files: [{ path: "src/a.ts", sha256: aSha }],
+	patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 200\n*** End Patch`,
+})
+ok("apply_patch expected_files sha256 khop thanh cong", apEfOk.files_changed === 1)
+
+// Restore src/a.ts content
+await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 200\n+const a = 2\n*** End Patch`,
+})
+
+await denies(
+	"expected_files sha256 mismatch KHONG tiet lo hash thuc te (anti-oracle)",
+	async () => {
+		try {
+			await applyPatch({
+				repo: "demo",
+				expected_files: [{ path: "src/a.ts", sha256: "badhash" }],
+				patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** End Patch`,
+			})
+		} catch (e: any) {
+			if (e.message.includes("Actual:")) {
+				throw new Error("FAIL: actual hash was leaked in error message")
+			}
+			throw e
+		}
+	},
+	"expected_files sha256 mismatch",
+)
+
+await denies(
+	"expected_files chan deny-listed path",
+	() =>
+		applyPatch({
+			repo: "demo",
+			expected_files: [{ path: ".env", sha256: "123456" }],
+			patch_text: `*** Begin Patch\n*** Add File: test_ef.ts\n+bad\n*** End Patch`,
+		}),
+	"deny-list",
+)
+
+// Invalid UTF-8 binary detection test (0xFF 0xFE 0xFD sequence)
+const invalidUtf8Path = join(demoRoot, "src", "invalid_utf8.bin")
+writeFileSync(invalidUtf8Path, Buffer.from([0xff, 0xfe, 0xfd]))
+await denies(
+	"apply_patch tu choi file chuoi byte UTF-8 khong hop le (invalid UTF-8 sequence)",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Update File: src/invalid_utf8.bin\n@@\n-foo\n+bar\n*** End Patch`,
+		}),
+	"non-UTF-8 or binary files",
 )
 const { unlinkSync: testUnlink } = await import("node:fs")
-testUnlink(binPath)
+testUnlink(invalidUtf8Path)
 
-// Fault injection rollback test (Add + Update + Move + Delete mid-commit fault)
+// Multi-step Fault Injection Rollback Tests (Step 1, Step 2 mid-rename, Step 3 mid-unlink)
 await createFile({ repo: "demo", path: "src/rb_del.ts", content: "export const rbDel = true\n" })
 await createFile({ repo: "demo", path: "src/rb_move.ts", content: "export const rbMove = true\n" })
 await createFile({ repo: "demo", path: "src/rb_upd.ts", content: "export const rbUpd = 1\n" })
 
-await denies(
-	"apply_patch rollback mid-commit khi commit gap loi (restore Delete, Move, Update, Add)",
-	() =>
-		applyPatch({
-			repo: "demo",
-			patch_text: `*** Begin Patch\n*** Add File: src/rb_add.ts\n+new\n*** Update File: src/rb_upd.ts\n@@\n-export const rbUpd = 1\n+export const rbUpd = 999\n*** Update File: src/rb_move.ts\n*** Move to: src/rb_moved_dest.ts\n@@\n-export const rbMove = true\n+export const rbMove = false\n*** Delete File: src/rb_del.ts\n*** End Patch`,
-			__test_fail_commit: true,
-		}),
-	"Fault injection test error",
-)
+const stepPatch = `*** Begin Patch\n*** Add File: src/rb_add.ts\n+new\n*** Update File: src/rb_upd.ts\n@@\n-export const rbUpd = 1\n+export const rbUpd = 999\n*** Update File: src/rb_move.ts\n*** Move to: src/rb_moved_dest.ts\n@@\n-export const rbMove = true\n+export const rbMove = false\n*** Delete File: src/rb_del.ts\n*** End Patch`
 
-ok("rollback khoi phuc file delete", (await readFile({ repo: "demo", path: "src/rb_del.ts" })).text.includes("rbDel = true"))
-ok("rollback khoi phuc file move source va xoa destination", (await readFile({ repo: "demo", path: "src/rb_move.ts" })).text.includes("rbMove = true"))
-ok("rollback khoi phuc file update", (await readFile({ repo: "demo", path: "src/rb_upd.ts" })).text.includes("rbUpd = 1"))
-ok("rollback xoa file add", !(await listDir({ repo: "demo", path: "src" })).entries.some((c) => c.name === "rb_add.ts"))
+// Fault during Step 1 (temp write)
+await denies(
+	"apply_patch rollback mid-commit Step 1 (temp write failure)",
+	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 1 }),
+	"Fault injection test error during Step 1",
+)
+ok("Step 1 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_del.ts" })).text.includes("rbDel = true"))
+
+// Fault during Step 2 (mid-rename)
+await denies(
+	"apply_patch rollback mid-commit Step 2 (mid-rename failure)",
+	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 2 }),
+	"Fault injection test error during Step 2",
+)
+ok("Step 2 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_move.ts" })).text.includes("rbMove = true"))
+
+// Fault during Step 3 (mid-unlink)
+await denies(
+	"apply_patch rollback mid-commit Step 3 (mid-unlink failure)",
+	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 3 }),
+	"Fault injection test error during Step 3",
+)
+ok("Step 3 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_upd.ts" })).text.includes("rbUpd = 1"))
 
 // Cleanup rollback test files
 await applyPatch({
 	repo: "demo",
-	patch_text: `*** Begin Patch\n*** Delete File: src/rb_del.ts\n*** Delete File: src/rb_move.ts\n*** Delete File: src/rb_upd.ts\n*** End Patch`,
+	patch_text: `*** Begin Patch\n*** Delete File: src/rb_del.ts\n*** Delete File: src/rb_move.ts\n*** Delete File: src/rb_upd.ts\n*** Delete File: src/head_test.ts\n*** End Patch`,
 })
 
 const redactedLog = redactForAudit({ patch_text: "*** Begin Patch\nsecret\n*** End Patch" })
 ok("audit log redact patch_text", typeof redactedLog === "object" && (redactedLog as any).patch_text.includes("khong ghi noi dung"))
 
 const { forgetTouched } = await import("../src/touched.js")
-forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts", "src/multi_src.ts", "src/multi_add.ts", "src/multi_moved.ts", "src/rb_del.ts", "src/rb_move.ts", "src/rb_upd.ts", "src/rb_add.ts", "src/binary.bin")
+forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts", "src/multi_src.ts", "src/multi_add.ts", "src/multi_moved.ts", "src/rb_del.ts", "src/rb_move.ts", "src/rb_upd.ts", "src/rb_add.ts", "src/head_test.ts", "src/binary.bin")
 
 // —— Git ——
 console.log("\ngit")

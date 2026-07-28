@@ -35,12 +35,17 @@ export const applyPatchSchema = {
 		.describe("Tuong hop chong stale: hash sha256 ky vong cua cac file lien quan truoc khi sua"),
 }
 
-function isBufferBinary(buf: Buffer): boolean {
+function isValidUtf8(buf: Buffer): boolean {
 	const sample = buf.subarray(0, Math.min(8000, buf.length))
 	for (let i = 0; i < sample.length; i++) {
-		if (sample[i] === 0) return true
+		if (sample[i] === 0) return false
 	}
-	return false
+	try {
+		new TextDecoder("utf-8", { fatal: true }).decode(buf)
+		return true
+	} catch {
+		return false
+	}
 }
 
 function isCrlf(raw: string): boolean {
@@ -87,6 +92,7 @@ export async function applyPatch(a: {
 	expected_head_sha?: string
 	expected_files?: Array<{ path: string; sha256: string }>
 	__test_fail_commit?: boolean
+	__test_fail_after_step?: number
 }) {
 	// Phase A: Parse
 	const parsed = parsePatch(a.patch_text)
@@ -162,8 +168,8 @@ export async function applyPatch(a: {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
 			const buf = readFileSync(abs)
-			if (isBufferBinary(buf)) {
-				throw new Error(`apply_patch does not support binary files: ${op.path}`)
+			if (!isValidUtf8(buf)) {
+				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
 			const sha256 = createHash("sha256").update(buf).digest("hex")
 			const raw = buf.toString("utf8")
@@ -185,8 +191,8 @@ export async function applyPatch(a: {
 			}
 
 			const buf = readFileSync(srcAbs)
-			if (isBufferBinary(buf)) {
-				throw new Error(`apply_patch does not support binary files: ${op.path}`)
+			if (!isValidUtf8(buf)) {
+				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
 			const sha256 = createHash("sha256").update(buf).digest("hex")
 			const raw = buf.toString("utf8")
@@ -203,8 +209,8 @@ export async function applyPatch(a: {
 			}
 			const abs = safeResolve(repo.root, ef.path)
 			const buf = readFileSync(abs)
-			if (isBufferBinary(buf)) {
-				throw new Error(`apply_patch does not support binary files: ${ef.path}`)
+			if (!isValidUtf8(buf)) {
+				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${ef.path}`)
 			}
 			const actualHash = createHash("sha256").update(buf).digest("hex")
 			if (actualHash !== ef.sha256) {
@@ -250,6 +256,10 @@ export async function applyPatch(a: {
 	const touchedPaths: string[] = []
 
 	try {
+		let writtenCount = 0
+		let renamedCount = 0
+		let unlinkedCount = 0
+
 		// Step 1: Write all new/updated contents to temporary files
 		for (const change of plan.changes) {
 			if (change.type === "add") {
@@ -276,11 +286,19 @@ export async function applyPatch(a: {
 			} else if (change.type === "delete") {
 				touchedPaths.push(change.path)
 			}
+			writtenCount++
+			if (a.__test_fail_after_step === 1 && writtenCount >= 1) {
+				throw new Error("Fault injection test error during Step 1 (temp write)")
+			}
 		}
 
 		// Step 2: Atomic rename temp files into targets
 		for (const { tmpPath, targetAbs } of writtenTemps) {
 			renameSync(tmpPath, targetAbs)
+			renamedCount++
+			if (a.__test_fail_after_step === 2 && renamedCount >= 1) {
+				throw new Error("Fault injection test error during Step 2 (mid-rename)")
+			}
 		}
 
 		// Step 3: Perform deletes and move source unlinks
@@ -288,9 +306,14 @@ export async function applyPatch(a: {
 			if (change.type === "delete") {
 				const abs = safeResolve(repo.root, change.path)
 				if (existsSync(abs)) unlinkSync(abs)
+				unlinkedCount++
 			} else if (change.type === "move") {
 				const srcAbs = safeResolve(repo.root, change.from)
 				if (existsSync(srcAbs)) unlinkSync(srcAbs)
+				unlinkedCount++
+			}
+			if (a.__test_fail_after_step === 3 && unlinkedCount >= 1) {
+				throw new Error("Fault injection test error during Step 3 (mid-unlink)")
 			}
 		}
 
