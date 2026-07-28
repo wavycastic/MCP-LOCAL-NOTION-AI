@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -56,8 +56,25 @@ export const WORKSPACE_ROOT = optRealpath("WORKSPACE_ROOT")
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)))
 
+function findReposConfig(): string {
+	if (process.env.REPOS_CONFIG) {
+		const envPath = resolve(appDir, process.env.REPOS_CONFIG)
+		if (existsSync(envPath)) return envPath
+	}
+	const candidates = [
+		resolve(appDir, "repos.json"),
+		resolve(process.cwd(), "repos.json"),
+		...(process.env.PORTABLE_EXECUTABLE_DIR ? [resolve(process.env.PORTABLE_EXECUTABLE_DIR, "repos.json")] : []),
+		resolve(dirname(appDir), "repos.json"),
+	]
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) return candidate
+	}
+	return resolve(appDir, "repos.json")
+}
+
 /** File khai bao repo tuong minh (quyen ghi, build/test cmd). */
-export const REPOS_CONFIG = resolve(appDir, process.env.REPOS_CONFIG ?? "repos.json")
+export const REPOS_CONFIG = findReposConfig()
 
 /** Repo tu dong tim thay co duoc ghi khong. Mac dinh khong. */
 export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
