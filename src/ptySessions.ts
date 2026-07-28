@@ -12,7 +12,7 @@ import {
 import type { ShellKind } from "./terminalShell.js"
 import { buildPtySpawn } from "./terminalShell.js"
 
-export type PtyStatus = "running" | "exited" | "closed"
+export type PtyStatus = "running" | "closing" | "exited" | "closed"
 
 export type PtySessionView = {
 	id: string
@@ -40,6 +40,7 @@ type PtyRecord = {
 	buffer: Buffer
 	done: Promise<void>
 	finish: () => void
+	closeTimer?: NodeJS.Timeout
 }
 
 const sessions = new Map<string, PtyRecord>()
@@ -50,7 +51,9 @@ function touch(rec: PtyRecord): void {
 
 function runningCount(): number {
 	let count = 0
-	for (const rec of sessions.values()) if (rec.view.status === "running") count++
+	for (const rec of sessions.values()) {
+		if (rec.view.status === "running" || rec.view.status === "closing") count++
+	}
 	return count
 }
 
@@ -58,7 +61,7 @@ function pruneFinished(): void {
 	const maxRetained = Math.max(PTY_MAX_SESSIONS * 4, PTY_MAX_SESSIONS)
 	if (sessions.size < maxRetained) return
 	const finished = [...sessions.values()]
-		.filter((rec) => rec.view.status !== "running")
+		.filter((rec) => rec.view.status === "exited" || rec.view.status === "closed")
 		.sort((a, b) => a.view.last_activity_at.localeCompare(b.view.last_activity_at))
 	for (const rec of finished) {
 		if (sessions.size < maxRetained) break
@@ -138,7 +141,9 @@ export function startPtySession(args: {
 	sessions.set(id, rec)
 	pty.onData((data) => appendOutput(rec, data))
 	pty.onExit(({ exitCode, signal }) => {
-		if (rec.view.status === "running") rec.view.status = "exited"
+		if (rec.closeTimer) clearTimeout(rec.closeTimer)
+		rec.closeTimer = undefined
+		rec.view.status = rec.view.status === "closing" ? "closed" : "exited"
 		rec.view.exit_code = exitCode
 		rec.view.signal = signal
 		rec.view.ended_at = new Date().toISOString()
@@ -216,17 +221,40 @@ export function resizePtySession(id: string, cols: number, rows: number): PtySes
 	return viewOf(rec)
 }
 
-export function closePtySession(id: string): PtySessionView & { already_finished: boolean } {
+export async function closePtySession(id: string): Promise<PtySessionView & { already_finished: boolean; already_closing: boolean }> {
 	const rec = requireSession(id)
-	const alreadyFinished = rec.view.status !== "running"
-	if (!alreadyFinished) {
-		rec.view.status = "closed"
-		rec.view.ended_at = new Date().toISOString()
-		try { rec.pty.kill() } catch {}
-		rec.finish()
+	const alreadyFinished = rec.view.status === "exited" || rec.view.status === "closed"
+	const alreadyClosing = rec.view.status === "closing"
+	if (alreadyFinished) {
+		touch(rec)
+		return { ...viewOf(rec), already_finished: true, already_closing: false }
 	}
-	touch(rec)
-	return { ...viewOf(rec), already_finished: alreadyFinished }
+
+	if (!alreadyClosing) {
+		rec.view.status = "closing"
+		touch(rec)
+		try {
+			rec.pty.kill()
+		} catch (error) {
+			rec.view.status = "running"
+			throw new Error(`Khong dong duoc PTY session '${id}': ${error instanceof Error ? error.message : String(error)}`)
+		}
+		// Normally node-pty emits onExit and releases the repo lease. If a native
+		// backend fails to emit it, force the shell PID down and release after a
+		// bounded grace period instead of deadlocking the repo forever.
+		rec.closeTimer = setTimeout(() => {
+			if (rec.view.status !== "closing") return
+			try { process.kill(rec.view.pid, "SIGKILL") } catch {}
+			rec.view.status = "closed"
+			rec.view.ended_at = new Date().toISOString()
+			touch(rec)
+			rec.finish()
+		}, 5_000)
+		rec.closeTimer.unref()
+	}
+
+	await rec.done
+	return { ...viewOf(rec), already_finished: false, already_closing: alreadyClosing }
 }
 
 export function listPtySessions(repo?: string): PtySessionView[] {
@@ -239,8 +267,8 @@ export function listPtySessions(repo?: string): PtySessionView[] {
 export function killAllPtySessions(): number {
 	let killed = 0
 	for (const rec of sessions.values()) {
-		if (rec.view.status !== "running") continue
-		closePtySession(rec.view.id)
+		if (rec.view.status !== "running" && rec.view.status !== "closing") continue
+		void closePtySession(rec.view.id).catch(() => undefined)
 		killed++
 	}
 	return killed
@@ -250,13 +278,14 @@ const cleanupTimer = setInterval(() => {
 	const now = Date.now()
 	for (const rec of sessions.values()) {
 		const idleMs = now - Date.parse(rec.view.last_activity_at)
-		if (rec.view.status !== "running") {
+		if (rec.view.status === "exited" || rec.view.status === "closed") {
 			if (idleMs > PTY_IDLE_TIMEOUT_MS) sessions.delete(rec.view.id)
 			continue
 		}
+		if (rec.view.status === "closing") continue
 		const lifetimeMs = now - Date.parse(rec.view.started_at)
 		if (idleMs > PTY_IDLE_TIMEOUT_MS || lifetimeMs > PTY_MAX_LIFETIME_MS) {
-			closePtySession(rec.view.id)
+			void closePtySession(rec.view.id).catch(() => undefined)
 		}
 	}
 }, Math.min(30_000, Math.max(1_000, Math.floor(PTY_IDLE_TIMEOUT_MS / 4))))
