@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
+import { assertGitRepo } from "../git.js"
 import { resolveRepo } from "../repos.js"
 
 export const ghPrSchema = {
@@ -23,6 +24,7 @@ export async function ghPr(a: {
 	pr?: string
 }) {
 	const repo = resolveRepo(a.repo)
+	assertGitRepo(repo)
 
 	// Check if `gh` CLI is available
 	try {

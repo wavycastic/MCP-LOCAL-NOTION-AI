@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
+import { assertGitRepo } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
@@ -17,6 +18,7 @@ export async function gitBlame(a: {
 	line_end?: number
 }) {
 	const repo = resolveRepo(a.repo)
+	assertGitRepo(repo)
 	safeResolve(repo.root, a.path) // chroot + deny-list
 	const argv = ["git", "--no-pager", "blame", "--line-porcelain"]
 	if (a.line_start) {

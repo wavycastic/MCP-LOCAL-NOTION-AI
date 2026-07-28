@@ -1,7 +1,24 @@
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { run } from "./exec.js"
 import { assertWritableRepo, type Repo } from "./repos.js"
+import { FULL_ACCESS_ROOT } from "./security/paths.js"
+
+export function assertGitRepo(repo: Repo): void {
+	const cwd =
+		repo.root === FULL_ACCESS_ROOT
+			? (process.env.FULL_ACCESS_CWD ?? process.cwd())
+			: repo.root
+	if (!existsSync(join(cwd, ".git"))) {
+		throw new Error(
+			`Repo "${repo.name}" (cwd: "${cwd}") khong phai la mot Git Repository (khong tim thay thu muc .git). ` +
+				`Vui long truyen tham so "repo" la mot Git repo cu the (vd: "CV-AUT", "local-repo-mcp", "flowlens") de thao tac Git.`,
+		)
+	}
+}
 
 export async function currentBranch(repo: Repo): Promise<string> {
+	assertGitRepo(repo)
 	const r = await run(["git", "branch", "--show-current"], {
 		cwd: repo.root,
 		timeoutMs: 15_000,
@@ -31,6 +48,7 @@ export function branchAllowed(repo: Repo, branch: string): boolean {
  */
 export async function assertWritableBranch(repo: Repo): Promise<string> {
 	assertWritableRepo(repo)
+	assertGitRepo(repo)
 	if (repo.source === "system") return "(system)"
 	const b = await currentBranch(repo)
 	if (!branchAllowed(repo, b)) {
@@ -43,6 +61,7 @@ export async function assertWritableBranch(repo: Repo): Promise<string> {
 }
 
 export async function isDirty(repo: Repo): Promise<boolean> {
+	assertGitRepo(repo)
 	const r = await run(["git", "status", "--porcelain"], {
 		cwd: repo.root,
 		timeoutMs: 15_000,

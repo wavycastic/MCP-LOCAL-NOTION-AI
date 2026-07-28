@@ -248,6 +248,14 @@ ok(
 
 // —— Git ——
 console.log("\ngit")
+await denies(
+	"assertGitRepo chan repo khong phai git",
+	async () => {
+		const { assertGitRepo } = await import("../src/git.js")
+		assertGitRepo({ name: "nogit", root: workspace, write: true, branchPrefix: "*", reindex: [], toolchain: "none", source: "config" })
+	},
+	"khong phai la mot Git Repository",
+)
 const s1 = await gitStatus({ repo: "demo" })
 ok("git_status thay dirty", s1.dirty === true)
 ok("git_status bao writable", s1.writable === true)

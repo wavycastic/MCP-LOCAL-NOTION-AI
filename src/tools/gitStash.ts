@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
-import { assertWritableBranch } from "../git.js"
+import { assertGitRepo, assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 
 export const gitStashSchema = {
@@ -11,6 +11,7 @@ export const gitStashSchema = {
 
 export async function gitStash(a: { repo?: string; action: "push" | "pop" | "list"; message?: string }) {
 	const repo = resolveRepo(a.repo)
+	assertGitRepo(repo)
 
 	if (a.action === "push") {
 		await assertWritableBranch(repo)

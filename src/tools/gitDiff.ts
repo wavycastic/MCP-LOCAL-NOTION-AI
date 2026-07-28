@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
+import { assertGitRepo } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
@@ -17,6 +18,7 @@ export async function gitDiff(a: {
 	stat_only?: boolean
 }) {
 	const repo = resolveRepo(a.repo)
+	assertGitRepo(repo)
 	const argv = ["git", "--no-pager", "diff", "--no-color"]
 	if (a.staged) argv.push("--cached")
 	if (a.stat_only) argv.push("--stat")
