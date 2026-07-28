@@ -328,7 +328,15 @@ function stop(kind: "mcp" | "gitnexus") {
 	const child = procs[kind].child
 	if (!child) return state()
 	appendLog("gui", `stopping ${kind}`)
-	child.kill("SIGTERM")
+	if (process.platform === "win32" && child.pid) {
+		try {
+			spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" })
+		} catch {
+			child.kill("SIGKILL")
+		}
+	} else {
+		child.kill("SIGTERM")
+	}
 	return state()
 }
 
