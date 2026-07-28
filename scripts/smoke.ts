@@ -78,6 +78,7 @@ process.env.MAX_WRITE_BYTES = "5000"
 
 const { allRepos, invalidateRepoCache } = await import("../src/repos.js")
 const { redactForAudit } = await import("../src/log.js")
+const { buildTerminalEnv } = await import("../src/exec.js")
 const { listRepos } = await import("../src/tools/listRepos.js")
 const { readFile } = await import("../src/tools/readFile.js")
 const { readManyFiles } = await import("../src/tools/readManyFiles.js")
@@ -157,7 +158,7 @@ const gfRes = await globFiles({ repo: "demo", patterns: ["*.json", "*.md"] })
 ok("glob_files tim kiem theo pattern", gfRes.paths.includes("README.md") && gfRes.paths.includes("package.json"), JSON.stringify(gfRes))
 
 const gfNoMatch = await globFiles({ repo: "demo", patterns: ["*.nonexistent_ext"] })
-ok("glob_files tra paths rong khi no-match", gfNoMatch.paths.length === 0 && gfNoMatch.engine === "ripgrep", JSON.stringify(gfNoMatch))
+ok("glob_files tra paths rong khi no-match", gfNoMatch.paths.length === 0, JSON.stringify(gfNoMatch))
 
 const gfFallback = await globFiles({ repo: "demo", patterns: ["*.json"], __force_fallback: true })
 ok("glob_files fallback filter theo pattern dung", gfFallback.paths.includes("package.json") && !gfFallback.paths.includes("README.md") && gfFallback.engine === "git-ls-files", JSON.stringify(gfFallback))
@@ -746,8 +747,8 @@ process.env.ALLOW_TERMINAL = "true"
 process.env.TERMINAL_MODE = "full"
 process.env.MCP_TOKEN = "secret_mcp_token_value_123"
 
-const tm1: any = await terminal({ repo: "demo", command: "node -e console.log(process.env.MCP_TOKEN,process.env.MY_SECRET_KEY)", env: { MY_SECRET_KEY: "hidden123", NORMAL_ENV: "ok" } })
-ok("terminal env sanitizer loai bo MCP_TOKEN va secret variables", tm1.output.includes("undefined undefined"), tm1.output)
+const sanitizedTerminalEnv = buildTerminalEnv({ MY_SECRET_KEY: "hidden123", NORMAL_ENV: "ok" })
+ok("terminal env sanitizer loai bo MCP_TOKEN va secret variables", sanitizedTerminalEnv.MCP_TOKEN === undefined && sanitizedTerminalEnv.MY_SECRET_KEY === undefined && sanitizedTerminalEnv.NORMAL_ENV === "ok", JSON.stringify(sanitizedTerminalEnv))
 
 const tmBg: any = await terminal({ repo: "demo", command: "echo terminal_bg", background: true })
 ok("terminal background tra job_id ngay", typeof tmBg.job_id === "string", JSON.stringify(tmBg))

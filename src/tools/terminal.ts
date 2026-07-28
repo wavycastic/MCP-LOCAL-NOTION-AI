@@ -8,22 +8,10 @@ import { safeResolveDir } from "../security/paths.js"
 export const terminalSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos). Bo trong neu chi co 1 repo"),
 	command: z.string().min(1).describe("Lenh terminal can chay, se duoc thuc thi qua shell cua OS"),
-	dir: z
-		.string()
-		.optional()
-		.describe("Thu muc con tuong doi trong repo de chay lenh (mac dinh: repo root)"),
-	shell: z
-		.enum(["cmd", "powershell", "pwsh", "bash", "sh"])
-		.optional()
-		.describe("Loai shell de thuc thi (cmd, powershell, pwsh, bash, sh)"),
-	env: z
-		.record(z.string())
-		.optional()
-		.describe("Cac bien moi truong ghi de (Key-Value) khi chay lenh"),
-	background: z
-		.boolean()
-		.optional()
-		.describe("true: tra ve job_id ngay, hoi ket qua bang job_status"),
+	dir: z.string().optional().describe("Thu muc con tuong doi trong repo de chay lenh (mac dinh: repo root)"),
+	shell: z.enum(["cmd", "powershell", "pwsh", "bash", "sh"]).optional().describe("Loai shell de thuc thi (cmd, powershell, pwsh, bash, sh)"),
+	env: z.record(z.string()).optional().describe("Cac bien moi truong ghi de (Key-Value) khi chay lenh"),
+	background: z.boolean().optional().describe("true: tra ve job_id ngay, hoi ket qua bang job_status"),
 }
 
 function queued(repoName: string, job: Job, waited: boolean) {
@@ -39,40 +27,29 @@ function queued(repoName: string, job: Job, waited: boolean) {
 }
 
 function finished(repoName: string, job: Job) {
-	const rawOut = job.output ?? job.error ?? ""
-	const truncated = rawOut.length > TERMINAL_MAX_OUTPUT_BYTES
-	const finalOut = truncated ? rawOut.slice(0, TERMINAL_MAX_OUTPUT_BYTES) + "\n... [output truncated]" : rawOut
-
 	return {
 		repo: repoName,
 		job_id: job.id,
 		command_length: job.command.length,
 		exit_code: job.exit_code ?? null,
 		timed_out: job.timed_out ?? false,
-		output: finalOut,
-		output_truncated: truncated,
+		output: job.output ?? job.error ?? "",
+		output_truncated: job.output_truncated ?? false,
+		output_bytes_seen: job.output_bytes_seen ?? 0,
 	}
 }
 
 function buildShellArgv(cmdStr: string, chosenShell?: string): string[] {
 	if (chosenShell) {
 		switch (chosenShell) {
-			case "cmd":
-				return ["cmd", "/c", cmdStr]
-			case "powershell":
-				return ["powershell", "-NoProfile", "-Command", cmdStr]
-			case "pwsh":
-				return ["pwsh", "-NoProfile", "-Command", cmdStr]
-			case "bash":
-				return ["bash", "-c", cmdStr]
-			case "sh":
-				return ["sh", "-c", cmdStr]
+			case "cmd": return ["cmd", "/c", cmdStr]
+			case "powershell": return ["powershell", "-NoProfile", "-Command", cmdStr]
+			case "pwsh": return ["pwsh", "-NoProfile", "-Command", cmdStr]
+			case "bash": return ["bash", "-c", cmdStr]
+			case "sh": return ["sh", "-c", cmdStr]
 		}
 	}
-	if (process.platform === "win32") {
-		return ["cmd", "/c", cmdStr]
-	}
-	return ["sh", "-c", cmdStr]
+	return process.platform === "win32" ? ["cmd", "/c", cmdStr] : ["sh", "-c", cmdStr]
 }
 
 export async function terminal(a: {
@@ -84,15 +61,10 @@ export async function terminal(a: {
 	background?: boolean
 }) {
 	if (!ALLOW_TERMINAL || TERMINAL_MODE === "disabled") {
-		throw new Error(
-			`terminal tool dang tat. Dat ALLOW_TERMINAL=true trong env neu that su muon cho agent chay shell lenh truc tiep`,
-		)
+		throw new Error("terminal tool dang tat. Dat ALLOW_TERMINAL=true trong env neu that su muon cho agent chay shell lenh truc tiep")
 	}
-
 	if (a.command.length > TERMINAL_MAX_COMMAND_CHARS) {
-		throw new Error(
-			`Do dai command (${a.command.length} chars) vuot TERMINAL_MAX_COMMAND_CHARS=${TERMINAL_MAX_COMMAND_CHARS}`,
-		)
+		throw new Error(`Do dai command (${a.command.length} chars) vuot TERMINAL_MAX_COMMAND_CHARS=${TERMINAL_MAX_COMMAND_CHARS}`)
 	}
 
 	const repo = resolveRepo(a.repo)
@@ -100,7 +72,7 @@ export async function terminal(a: {
 	const argv = buildShellArgv(a.command, a.shell)
 	const sanitizedEnv = buildTerminalEnv(a.env, TERMINAL_INHERIT_SECRETS)
 
-	const job = startJob(repo.name, repo.root, cwd, argv, undefined, sanitizedEnv)
+	const job = startJob(repo.name, repo.root, cwd, argv, undefined, sanitizedEnv, TERMINAL_MAX_OUTPUT_BYTES)
 	if (a.background) return queued(repo.name, job, false)
 
 	const done = await waitForJob(job.id, SYNC_WAIT_MS)
