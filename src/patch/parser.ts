@@ -21,15 +21,38 @@ export function parsePatch(patchText: string): ParsedPatch {
 	const normalized = patchText.replace(/\r\n/g, "\n")
 	const lines = normalized.split("\n")
 
-	// Find envelope boundaries
-	const beginIdx = lines.findIndex((l) => l.trim() === "*** Begin Patch")
-	if (beginIdx === -1) {
+	const beginMatches = lines.map((l, idx) => ({ l: l.trim(), idx })).filter((x) => x.l === "*** Begin Patch")
+	if (beginMatches.length === 0) {
 		throw new Error("apply_patch parsing failed: thieu header '*** Begin Patch'")
 	}
+	if (beginMatches.length > 1) {
+		throw new Error("apply_patch parsing failed: co nhieu hon 1 header '*** Begin Patch'")
+	}
+	const beginIdx = beginMatches[0].idx
 
-	const endIdx = lines.findIndex((l, idx) => idx > beginIdx && l.trim() === "*** End Patch")
-	if (endIdx === -1) {
+	const endMatches = lines.map((l, idx) => ({ l: l.trim(), idx })).filter((x) => x.l === "*** End Patch")
+	if (endMatches.length === 0) {
 		throw new Error("apply_patch parsing failed: thieu footer '*** End Patch'")
+	}
+	if (endMatches.length > 1) {
+		throw new Error("apply_patch parsing failed: co nhieu hon 1 footer '*** End Patch'")
+	}
+	const endIdx = endMatches[0].idx
+
+	if (endIdx < beginIdx) {
+		throw new Error("apply_patch parsing failed: '*** End Patch' xuat hien truoc '*** Begin Patch'")
+	}
+
+	// Reject non-empty lines outside the envelope
+	for (let i = 0; i < beginIdx; i++) {
+		if (lines[i].trim() !== "") {
+			throw new Error(`apply_patch parsing failed: co noi dung ngoai envelope truoc '*** Begin Patch' (dong #${i + 1})`)
+		}
+	}
+	for (let i = endIdx + 1; i < lines.length; i++) {
+		if (lines[i].trim() !== "") {
+			throw new Error(`apply_patch parsing failed: co noi dung ngoai envelope sau '*** End Patch' (dong #${i + 1})`)
+		}
 	}
 
 	const patchLines = lines.slice(beginIdx + 1, endIdx)

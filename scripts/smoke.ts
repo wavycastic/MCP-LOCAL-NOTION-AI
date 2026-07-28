@@ -359,7 +359,7 @@ await denies(
 			repo: "demo",
 			patch_text: `*** Begin Patch\n*** Add File: .env\n+SECRET=123\n*** End Patch`,
 		}),
-	"denied path",
+	"deny-list",
 )
 
 await denies(
@@ -372,14 +372,58 @@ await denies(
 	"chi-doc",
 )
 
+// Multi-file success patch (Add + Update + Move in 1 single patch call)
+await createFile({ repo: "demo", path: "src/multi_src.ts", content: "export const m1 = 1\n" })
+const apMulti = await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Add File: src/multi_add.ts\n+export const mAdd = true\n*** Update File: src/multi_src.ts\n*** Move to: src/multi_moved.ts\n@@\n-export const m1 = 1\n+export const m1 = 100\n*** End Patch`,
+})
+ok("apply_patch multi-file patch (Add + Update + Move) thanh cong trong 1 call", apMulti.files_changed === 2)
+ok("file mAdd da duoc tao", (await readFile({ repo: "demo", path: "src/multi_add.ts" })).text.includes("mAdd = true"))
+ok("file multi_moved da duoc tao va update", (await readFile({ repo: "demo", path: "src/multi_moved.ts" })).text.includes("m1 = 100"))
+
+// Cleanup multi-file test artifacts
+await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Delete File: src/multi_add.ts\n*** Delete File: src/multi_moved.ts\n*** End Patch`,
+})
+
 await denies(
-	"apply_patch chan khi expected_files.sha256 mismatch",
+	"apply_patch tu choi text ngoai envelope (truoc Begin Patch)",
 	() =>
 		applyPatch({
 			repo: "demo",
-			expected_files: [{ path: "src/a.ts", sha256: "0000000000000000000000000000000000000000000000000000000000000000" }],
-			patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** End Patch`,
+			patch_text: `extra text before\n*** Begin Patch\n*** Add File: src/bad.ts\n+bad\n*** End Patch`,
 		}),
+	"ngoai envelope",
+)
+
+await denies(
+	"apply_patch tu choi path collision (src/a.ts vs src/A.ts)",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Add File: src/collision.ts\n+c1\n*** Add File: src/COLLISION.ts\n+c2\n*** End Patch`,
+		}),
+	"Path target bi trung",
+)
+
+await denies(
+	"expected_files sha256 mismatch KHONG tiet lo hash thuc te (anti-oracle)",
+	async () => {
+		try {
+			await applyPatch({
+				repo: "demo",
+				expected_files: [{ path: "src/a.ts", sha256: "badhash" }],
+				patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** End Patch`,
+			})
+		} catch (e: any) {
+			if (e.message.includes("Actual:")) {
+				throw new Error("FAIL: actual hash was leaked in error message")
+			}
+			throw e
+		}
+	},
 	"expected_files sha256 mismatch",
 )
 
@@ -387,7 +431,7 @@ const redactedLog = redactForAudit({ patch_text: "*** Begin Patch\nsecret\n*** E
 ok("audit log redact patch_text", typeof redactedLog === "object" && (redactedLog as any).patch_text.includes("khong ghi noi dung"))
 
 const { forgetTouched } = await import("../src/touched.js")
-forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts")
+forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts", "src/multi_src.ts", "src/multi_add.ts", "src/multi_moved.ts")
 
 // —— Git ——
 console.log("\ngit")

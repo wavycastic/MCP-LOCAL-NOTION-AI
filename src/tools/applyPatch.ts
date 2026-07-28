@@ -35,6 +35,14 @@ export const applyPatchSchema = {
 		.describe("Tuong hop chong stale: hash sha256 ky vong cua cac file lien quan truoc khi sua"),
 }
 
+function isBinary(raw: string): boolean {
+	const sample = raw.slice(0, 8000)
+	for (let i = 0; i < sample.length; i++) {
+		if (sample.charCodeAt(i) === 0) return true
+	}
+	return false
+}
+
 function isCrlf(raw: string): boolean {
 	const crlf = (raw.match(/\r\n/g) ?? []).length
 	if (crlf === 0) return false
@@ -102,26 +110,30 @@ export async function applyPatch(a: {
 		}
 	}
 
-	// Detect target path conflicts
+	// Detect target path conflicts with canonicalization
+	const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase()
 	const targets = new Set<string>()
 	const sources = new Set<string>()
 
 	for (const op of parsed.operations) {
 		if (op.kind === "add") {
-			if (targets.has(op.path)) throw new Error(`apply_patch conflict: Path target bi trung: '${op.path}'`)
-			targets.add(op.path)
+			const np = norm(op.path)
+			if (targets.has(np)) throw new Error(`apply_patch conflict: Path target bi trung: '${op.path}'`)
+			targets.add(np)
 		} else if (op.kind === "delete") {
-			if (sources.has(op.path)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
-			sources.add(op.path)
+			const np = norm(op.path)
+			if (sources.has(np)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
+			sources.add(np)
 		} else if (op.kind === "update") {
-			if (sources.has(op.path)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
-			sources.add(op.path)
+			const np = norm(op.path)
+			if (sources.has(np)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
+			sources.add(np)
 			if (op.moveTo) {
-				if (targets.has(op.moveTo))
-					throw new Error(`apply_patch conflict: Path move target bi trung: '${op.moveTo}'`)
-				targets.add(op.moveTo)
+				const nmp = norm(op.moveTo)
+				if (targets.has(nmp)) throw new Error(`apply_patch conflict: Path move target bi trung: '${op.moveTo}'`)
+				targets.add(nmp)
 			} else {
-				targets.add(op.path)
+				targets.add(np)
 			}
 		}
 	}
@@ -131,55 +143,62 @@ export async function applyPatch(a: {
 
 	for (const op of parsed.operations) {
 		if (op.kind === "add") {
-			const abs = safeResolveNew(repo.root, op.path)
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			const abs = safeResolveNew(repo.root, op.path)
 			if (existsSync(abs)) {
 				throw new Error(`apply_patch verification failed: Add File target da ton tai: '${op.path}'`)
 			}
 			snapshots.set(op.path, { path: op.path, existed: false })
 		} else if (op.kind === "delete") {
-			const abs = safeResolve(repo.root, op.path)
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			const abs = safeResolve(repo.root, op.path)
 			const st = statSync(abs)
 			if (st.isDirectory()) {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
 			const raw = readFileSync(abs, "utf8")
+			if (isBinary(raw)) {
+				throw new Error(`apply_patch does not support binary files: ${op.path}`)
+			}
 			const sha256 = createHash("sha256").update(raw).digest("hex")
 			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256 })
 		} else if (op.kind === "update") {
-			const srcAbs = safeResolve(repo.root, op.path)
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			const srcAbs = safeResolve(repo.root, op.path)
 			const st = statSync(srcAbs)
 			if (st.isDirectory()) {
 				throw new Error(`apply_patch verification failed: Update File khong ho tro thu muc: '${op.path}'`)
 			}
 
 			if (op.moveTo) {
-				const destAbs = safeResolveNew(repo.root, op.moveTo)
 				if (isDeniedRelPath(op.moveTo)) throw new Error(`Path nam trong deny-list: '${op.moveTo}'`)
+				const destAbs = safeResolveNew(repo.root, op.moveTo)
 				if (existsSync(destAbs)) {
 					throw new Error(`apply_patch verification failed: Move target da ton tai: '${op.moveTo}'`)
 				}
 			}
 
 			const raw = readFileSync(srcAbs, "utf8")
+			if (isBinary(raw)) {
+				throw new Error(`apply_patch does not support binary files: ${op.path}`)
+			}
 			const sha256 = createHash("sha256").update(raw).digest("hex")
 			const eol = isCrlf(raw) ? "crlf" : "lf"
 			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256, eol })
 		}
 	}
 
-	// Validate expected_files hashes if provided
+	// Validate expected_files hashes if provided (with deny-list check and no hash oracle leak)
 	if (a.expected_files) {
 		for (const ef of a.expected_files) {
+			if (isDeniedRelPath(ef.path)) {
+				throw new Error(`Path nam trong deny-list: '${ef.path}'`)
+			}
 			const abs = safeResolve(repo.root, ef.path)
 			const raw = readFileSync(abs, "utf8")
 			const actualHash = createHash("sha256").update(raw).digest("hex")
 			if (actualHash !== ef.sha256) {
-				throw new Error(
-					`expected_files sha256 mismatch cho '${ef.path}'. Expected: ${ef.sha256}, Actual: ${actualHash}`,
-				)
+				throw new Error(`expected_files sha256 mismatch cho '${ef.path}'`)
 			}
 		}
 	}
@@ -281,14 +300,19 @@ export async function applyPatch(a: {
 				if (change.type === "add") {
 					const abs = safeResolveNew(repo.root, change.path)
 					if (existsSync(abs)) unlinkSync(abs)
-				} else if (change.type === "update" || change.type === "move") {
-					const srcPath = change.type === "move" ? change.from : change.path
-					const abs = safeResolve(repo.root, srcPath)
+				} else if (change.type === "update") {
+					const abs = safeResolveNew(repo.root, change.path)
 					writeFileSync(abs, change.oldContent, "utf8")
-					if (change.type === "move") {
-						const destAbs = safeResolveNew(repo.root, change.to)
-						if (existsSync(destAbs)) unlinkSync(destAbs)
-					}
+				} else if (change.type === "move") {
+					const srcAbs = safeResolveNew(repo.root, change.from)
+					mkdirSync(dirname(srcAbs), { recursive: true })
+					writeFileSync(srcAbs, change.oldContent, "utf8")
+					const destAbs = safeResolveNew(repo.root, change.to)
+					if (existsSync(destAbs)) unlinkSync(destAbs)
+				} else if (change.type === "delete") {
+					const abs = safeResolveNew(repo.root, change.path)
+					mkdirSync(dirname(abs), { recursive: true })
+					writeFileSync(abs, change.oldContent, "utf8")
 				}
 			}
 		} catch (rbErr) {
