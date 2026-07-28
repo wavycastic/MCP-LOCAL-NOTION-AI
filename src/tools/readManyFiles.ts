@@ -1,7 +1,8 @@
-import { statSync } from "node:fs"
+import { stat } from "node:fs/promises"
 import { z } from "zod"
 import { MAX_READ_BYTES } from "../config.js"
-import { readTextSnapshot } from "../files/text.js"
+import { mapLimit } from "../files/concurrency.js"
+import { readTextSnapshotAsync } from "../files/text.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath, safeResolve } from "../security/paths.js"
 
@@ -49,80 +50,56 @@ export async function readManyFiles(a: {
 	const repo = resolveRepo(a.repo)
 	const maxTotalBytes = a.max_total_bytes ?? MAX_READ_BYTES
 
-	let accumulatedBytes = 0
-	let truncated = false
-	const results: FileItemResult[] = []
-
-	for (const item of a.files) {
-		if (accumulatedBytes >= maxTotalBytes) {
-			truncated = true
-			results.push({
-				path: item.path,
-				ok: false,
-				error: `Vuot max_total_bytes=${maxTotalBytes}`,
-			})
-			continue
-		}
-
+	type Prepared = { result: FileItemResult; sliceBytes: number }
+	const prepared = await mapLimit(a.files, 8, async (item): Promise<Prepared> => {
 		try {
 			if (isDeniedRelPath(item.path)) {
-				results.push({
-					path: item.path,
-					ok: false,
-					error: `Path nam trong deny-list: '${item.path}'`,
-				})
-				continue
+				return { result: { path: item.path, ok: false, error: `Path nam trong deny-list: '${item.path}'` }, sliceBytes: 0 }
 			}
-
 			const abs = safeResolve(repo.root, item.path)
-			const size = statSync(abs).size
+			const size = (await stat(abs)).size
 			if (size > MAX_READ_BYTES) {
-				results.push({
-					path: item.path,
-					ok: false,
-					error: `${item.path} nang ${size} bytes, vuot MAX_READ_BYTES=${MAX_READ_BYTES}`,
-				})
-				continue
+				return { result: { path: item.path, ok: false, error: `${item.path} nang ${size} bytes, vuot MAX_READ_BYTES=${MAX_READ_BYTES}` }, sliceBytes: 0 }
 			}
 
-			const snap = readTextSnapshot(abs)
+			const snap = await readTextSnapshotAsync(abs)
 			const lines = snap.text.split("\n")
 			const start = (item.line_start ?? 1) - 1
 			const end = Math.min(item.line_end ?? start + 400, lines.length)
 			const sliceText = lines.slice(start, end).join("\n")
 			const sliceBytes = Buffer.byteLength(sliceText, "utf8")
-
-			if (accumulatedBytes + sliceBytes > maxTotalBytes) {
-				truncated = true
-				results.push({
+			return {
+				result: {
 					path: item.path,
-					ok: false,
-					error: `Vuot max_total_bytes=${maxTotalBytes}`,
-				})
-				continue
+					ok: true,
+					start_line: start + 1,
+					end_line: end,
+					total_lines: lines.length,
+					truncated: end < lines.length,
+					text: sliceText,
+					size_bytes: snap.sizeBytes,
+					sha256: snap.sha256,
+					eol: snap.eol,
+					bom: snap.bom,
+				},
+				sliceBytes,
 			}
-
-			accumulatedBytes += sliceBytes
-			results.push({
-				path: item.path,
-				ok: true,
-				start_line: start + 1,
-				end_line: end,
-				total_lines: lines.length,
-				truncated: end < lines.length,
-				text: sliceText,
-				size_bytes: snap.sizeBytes,
-				sha256: snap.sha256,
-				eol: snap.eol,
-				bom: snap.bom,
-			})
 		} catch (err: any) {
-			results.push({
-				path: item.path,
-				ok: false,
-				error: err.message ?? String(err),
-			})
+			return { result: { path: item.path, ok: false, error: err.message ?? String(err) }, sliceBytes: 0 }
 		}
+	})
+
+	let accumulatedBytes = 0
+	let truncated = false
+	const results: FileItemResult[] = []
+	for (const item of prepared) {
+		if (item.result.ok && accumulatedBytes + item.sliceBytes > maxTotalBytes) {
+			truncated = true
+			results.push({ path: item.result.path, ok: false, error: `Vuot max_total_bytes=${maxTotalBytes}` })
+			continue
+		}
+		if (item.result.ok) accumulatedBytes += item.sliceBytes
+		results.push(item.result)
 	}
 
 	return {

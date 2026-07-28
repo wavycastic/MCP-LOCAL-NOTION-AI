@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { readFileSync, statSync } from "node:fs"
+import { readFile, stat } from "node:fs/promises"
 
 export type TextSnapshot = {
 	buffer: Buffer
@@ -38,6 +39,24 @@ export function detectEol(text: string): "lf" | "crlf" {
 	if (crlfCount === 0) return "lf"
 	const lfTotal = (text.match(/\n/g) ?? []).length
 	return crlfCount >= lfTotal - crlfCount ? "crlf" : "lf"
+}
+
+/** Async variant used by bounded-parallel batch tools. */
+export async function readTextSnapshotAsync(abs: string): Promise<TextSnapshot> {
+	const [buffer, st] = await Promise.all([
+		readFile(abs),
+		stat(abs).catch(() => undefined),
+	])
+	const { text, bom } = decodeStrictUtf8(buffer)
+	return {
+		buffer,
+		text,
+		sha256: hashBuffer(buffer),
+		sizeBytes: buffer.length,
+		bom,
+		eol: detectEol(text),
+		mode: st?.mode,
+	}
 }
 
 export function readTextSnapshot(abs: string): TextSnapshot {

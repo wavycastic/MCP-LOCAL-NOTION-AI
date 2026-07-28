@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 import { run } from "./exec.js"
 import { assertWritableRepo, type Repo } from "./repos.js"
 import { FULL_ACCESS_ROOT } from "./security/paths.js"
@@ -19,11 +19,32 @@ export function assertGitRepo(repo: Repo): void {
 
 export async function currentBranch(repo: Repo): Promise<string> {
 	assertGitRepo(repo)
-	const r = await run(["git", "branch", "--show-current"], {
-		cwd: repo.root,
-		timeoutMs: 15_000,
-	})
-	return r.stdout.trim()
+	const cwd =
+		repo.root === FULL_ACCESS_ROOT
+			? (process.env.FULL_ACCESS_CWD ?? process.cwd())
+			: repo.root
+
+	// Fast path: avoid spawning Git on every edit. Supports normal repos and
+	// linked worktrees where .git is a `gitdir: ...` pointer file.
+	try {
+		const gitEntry = join(cwd, ".git")
+		let gitDir = gitEntry
+		if (!statSync(gitEntry).isDirectory()) {
+			const pointer = readFileSync(gitEntry, "utf8").trim()
+			if (!pointer.startsWith("gitdir:")) throw new Error("invalid .git pointer")
+			const target = pointer.slice("gitdir:".length).trim()
+			gitDir = isAbsolute(target) ? target : resolve(dirname(gitEntry), target)
+		}
+		const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim()
+		const prefix = "ref: refs/heads/"
+		return head.startsWith(prefix) ? head.slice(prefix.length) : ""
+	} catch {
+		const r = await run(["git", "branch", "--show-current"], {
+			cwd,
+			timeoutMs: 15_000,
+		})
+		return r.stdout.trim()
+	}
 }
 
 /**

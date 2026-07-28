@@ -13,6 +13,7 @@ export const globFilesSchema = {
 	path: z.string().optional().describe("Thu muc con de tim trong repo (mac dinh: repo root)"),
 	include_ignored: z.boolean().optional().describe("Neu true, bao gom ca cac file bi ignore (nhung van chan deny-list)"),
 	max_results: z.number().int().min(1).optional().describe("So luong ket qua toi da (mac dinh 1000)"),
+	use_cache: z.boolean().optional().describe("Mac dinh true: cache ket qua 250ms; write tools se invalidate ngay"),
 }
 
 const DEFAULT_IGNORE_GLOBS = [
@@ -25,7 +26,24 @@ const DEFAULT_IGNORE_GLOBS = [
 	"!.venv",
 ]
 
+const GLOB_CACHE_TTL_MS = 250
+const regexCache = new Map<string, RegExp>()
+type GlobResult = { repo: string; engine: "ripgrep" | "git-ls-files"; paths: string[]; total_returned: number; truncated: boolean; cache_hit: boolean }
+const resultCache = new Map<string, { expiresAt: number; result: GlobResult }>()
+
+export function invalidateGlobCache(repoRoot?: string): void {
+	if (!repoRoot) {
+		resultCache.clear()
+		return
+	}
+	for (const key of resultCache.keys()) {
+		if (key.startsWith(`${repoRoot}\u0000`)) resultCache.delete(key)
+	}
+}
+
 function globToRegex(glob: string): RegExp {
+	const cached = regexCache.get(glob)
+	if (cached) return cached
 	let p = glob.replace(/\\/g, "/")
 	if (!p.startsWith("/") && !p.startsWith("**")) {
 		p = "**/" + p
@@ -59,7 +77,9 @@ function globToRegex(glob: string): RegExp {
 		}
 	}
 	regexStr += "$"
-	return new RegExp(regexStr)
+	const compiled = new RegExp(regexStr)
+	regexCache.set(glob, compiled)
+	return compiled
 }
 
 function matchesAnyPattern(relPath: string, patterns: string[]): boolean {
@@ -83,11 +103,19 @@ export async function globFiles(a: {
 	path?: string
 	include_ignored?: boolean
 	max_results?: number
+	use_cache?: boolean
 	__force_fallback?: boolean
 }) {
 	const repo = resolveRepo(a.repo)
 	const cwd = safeResolveDir(repo.root, a.path)
 	const maxResults = a.max_results ?? 1000
+	const cacheKey = [repo.root, cwd, a.patterns.join("\u0001"), String(!!a.include_ignored), String(maxResults), String(!!a.__force_fallback)].join("\u0000")
+	if (a.use_cache !== false) {
+		const cached = resultCache.get(cacheKey)
+		if (cached && cached.expiresAt > Date.now()) {
+			return { ...cached.result, paths: [...cached.result.paths], cache_hit: true }
+		}
+	}
 
 	let engine: "ripgrep" | "git-ls-files" = "ripgrep"
 	let rawPaths: string[] = []
@@ -151,11 +179,16 @@ export async function globFiles(a: {
 	const truncated = sorted.length > maxResults
 	const finalPaths = sorted.slice(0, maxResults)
 
-	return {
+	const result: GlobResult = {
 		repo: repo.name,
 		engine,
 		paths: finalPaths,
 		total_returned: finalPaths.length,
 		truncated,
+		cache_hit: false,
 	}
+	if (a.use_cache !== false) {
+		resultCache.set(cacheKey, { expiresAt: Date.now() + GLOB_CACHE_TTL_MS, result })
+	}
+	return result
 }

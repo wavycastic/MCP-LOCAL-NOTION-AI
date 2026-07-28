@@ -58,7 +58,11 @@ export async function multiEditFile(a: {
 
 	for (let i = 0; i < a.edits.length; i++) {
 		const edit = a.edits[i]
-		const matches = findTextMatches({ source: currentText, needle: edit.old_str })
+		const matches = findTextMatches({
+			source: currentText,
+			needle: edit.old_str,
+			maxMatches: edit.replace_all ? undefined : 2,
+		})
 		const n = matches.length
 
 		if (n === 0) {

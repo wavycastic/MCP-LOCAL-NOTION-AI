@@ -156,6 +156,8 @@ ok("read_many_files ap dung byte budget len file dau tien", rmBudget.truncated =
 
 const gfRes = await globFiles({ repo: "demo", patterns: ["*.json", "*.md"] })
 ok("glob_files tim kiem theo pattern", gfRes.paths.includes("README.md") && gfRes.paths.includes("package.json"), JSON.stringify(gfRes))
+const gfCached = await globFiles({ repo: "demo", patterns: ["*.json", "*.md"] })
+ok("glob_files warm cache tra ket qua tuc thi", gfCached.cache_hit === true && gfCached.paths.length === gfRes.paths.length, JSON.stringify(gfCached))
 
 const gfNoMatch = await globFiles({ repo: "demo", patterns: ["*.nonexistent_ext"] })
 ok("glob_files tra paths rong khi no-match", gfNoMatch.paths.length === 0, JSON.stringify(gfNoMatch))
@@ -373,6 +375,7 @@ const apAdd = await applyPatch({
 	patch_text: `*** Begin Patch\n*** Add File: src/patched.ts\n+export const patched = true\n*** End Patch`,
 })
 ok("apply_patch Add File thanh cong", apAdd.files_changed === 1)
+ok("apply_patch write mac dinh compact summary", apAdd.response_detail === "summary" && !("diff" in apAdd), JSON.stringify(apAdd))
 ok("file moi da duoc tao bang apply_patch", (await readFile({ repo: "demo", path: "src/patched.ts" })).text.includes("patched = true"))
 
 const apDry = await applyPatch({
@@ -380,7 +383,7 @@ const apDry = await applyPatch({
 	dry_run: true,
 	patch_text: `*** Begin Patch\n*** Update File: src/patched.ts\n@@\n-export const patched = true\n+export const patched = "dry_run"\n*** End Patch`,
 })
-ok("apply_patch dry_run tra va summary", apDry.dry_run === true && apDry.files_changed === 1)
+ok("apply_patch dry_run tra diff mac dinh", apDry.dry_run === true && apDry.files_changed === 1 && apDry.response_detail === "diff" && "diff" in apDry)
 ok("dry_run KHONG thay doi file tren o dia", (await readFile({ repo: "demo", path: "src/patched.ts" })).text.includes("patched = true"))
 
 const apMove = await applyPatch({

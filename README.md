@@ -83,14 +83,14 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | --- | --- |
 | `list_repos` | Liet ke repo, quyen ghi, toolchain |
 | `read_file` | Doc file theo dong. Strict UTF-8, BOM/EOL detection, anti-binary |
-| `read_many_files` | Doc batch nhieu file (1-50 files) trong 1 MCP call, giam round-trips |
+| `read_many_files` | Doc batch 1-50 file bang bounded parallel I/O trong 1 MCP call |
 | `list_dir` | Liet ke thu muc. Bo qua `.git`, `node_modules`, `bin`, `obj`… |
-| `glob_files` | Tim file theo glob pattern (`**/*.ts`). Engine ripgrep / git-ls-files fallback |
+| `glob_files` | Tim file theo glob; regex/result cache 250ms, tu invalidate sau write; ripgrep/git fallback |
 | `ripgrep` | Tim chuoi/regex. `all_repos: true` de tim xuyen repo |
 | `create_file` | Chi tao file moi, khong ghi de |
-| `edit_file` | Thay text theo offset mapping (exact -> EOL norm -> trailing WS norm). Nhan `expected_sha256` |
-| `multi_edit_file` | Thay nhieu vi tri nguyen tu (all-or-nothing), offset mapping & atomic temp write |
-| `apply_patch` | Ap dung unified patch (Add, Update, Move, Delete), dry-run & best-effort rollback |
+| `edit_file` | Fast matcher (exact -> EOL norm -> trailing WS norm), dung sau match thu 2 khi chi can ambiguity check |
+| `multi_edit_file` | Thay nhieu vi tri nguyen tu; fast branch guard doc truc tiep `.git/HEAD` |
+| `apply_patch` | Patch nhieu file, parallel temp writes, rollback; `response_detail=summary|diff|full` |
 | `move_file` | `git mv`, giu blame |
 | `remove_file` | `git rm`, chi file da track |
 | `git_restore` | Duong lui: tra TUNG file ve HEAD. Khong nhan `.` hay wildcard |
@@ -127,12 +127,12 @@ npx tsx scripts/benchmark-tools.ts
 
 | Benchmark Case | Median (ms) | P95 (ms) | Round Trips | Success Rate |
 | :--- | :---: | :---: | :---: | :---: |
-| Single edit (`edit_file`) | ~23ms | ~25ms | 1 | 100% |
-| 10 edits (10 × `edit_file`) | ~225ms | ~229ms | 10 | 100% |
-| 10 edits (1 × `multi_edit_file`) | ~22ms | ~24ms | 1 | 100% |
-| 10 file patch (1 × `apply_patch`) | ~43ms | ~45ms | 1 | 100% |
-| Read 10 files (1 × `read_many_files`) | ~6ms | ~7ms | 1 | 100% |
-| Glob files (`glob_files`) | ~16ms | ~18ms | 1 | 100% |
+| Single edit (`edit_file`) | ~2.3ms | ~3.2ms | 1 | 100% |
+| 10 edits (10 × `edit_file`) | ~18.8ms | ~21.6ms | 10 | 100% |
+| 10 edits (1 × `multi_edit_file`) | ~2.3ms | ~2.5ms | 1 | 100% |
+| 10 file patch (1 × `apply_patch`, summary) | ~22.3ms | ~25.7ms | 1 | 100% |
+| Read 10 files (1 × `read_many_files`) | ~6.2ms | ~7.5ms | 1 | 100% |
+| Glob files warm cache | ~0.08ms | ~0.1ms | 1 | 100% |
 
 ## Env
 

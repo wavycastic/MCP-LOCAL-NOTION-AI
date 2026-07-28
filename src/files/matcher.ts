@@ -13,19 +13,21 @@ function toLf(s: string): string {
 	return s.replace(/\r\n/g, "\n")
 }
 
-function findExactMatches(source: string, needle: string): TextMatch[] {
+function findExactMatches(source: string, needle: string, maxMatches: number): TextMatch[] {
 	const matches: TextMatch[] = []
 	let pos = 0
 	while (pos < source.length) {
 		const idx = source.indexOf(needle, pos)
 		if (idx === -1) break
 		matches.push({ start: idx, end: idx + needle.length, mode: "exact" })
+		if (matches.length >= maxMatches) break
 		pos = idx + (needle.length || 1)
 	}
 	return matches
 }
 
-function findEolNormalizedMatches(source: string, needle: string): TextMatch[] {
+function findEolNormalizedMatches(source: string, needle: string, maxMatches: number): TextMatch[] {
+	if (!source.includes("\r") && !needle.includes("\r")) return []
 	const normSource = toLf(source)
 	const normNeedle = toLf(needle)
 	if (normNeedle.length === 0) return []
@@ -56,12 +58,15 @@ function findEolNormalizedMatches(source: string, needle: string): TextMatch[] {
 			end: mapIndex[normEnd]!,
 			mode: "eol_normalized",
 		})
+		if (matches.length >= maxMatches) break
 		pos = idx + (normNeedle.length || 1)
 	}
 	return matches
 }
 
-function findTrailingWhitespaceNormalizedMatches(source: string, needle: string): TextMatch[] {
+function findTrailingWhitespaceNormalizedMatches(source: string, needle: string, maxMatches: number): TextMatch[] {
+	const hasTrailingWhitespace = /[ \t]+(?=\r?\n|$)/
+	if (!hasTrailingWhitespace.test(source) && !hasTrailingWhitespace.test(needle)) return []
 	const normNeedle = toLf(needle)
 		.split("\n")
 		.map((l) => l.trimEnd())
@@ -124,6 +129,7 @@ function findTrailingWhitespaceNormalizedMatches(source: string, needle: string)
 			end: mapIndex[normEnd]!,
 			mode: "trailing_whitespace_normalized",
 		})
+		if (matches.length >= maxMatches) break
 		pos = idx + (normNeedle.length || 1)
 	}
 	return matches
@@ -133,22 +139,25 @@ export function findTextMatches(args: {
 	source: string
 	needle: string
 	allowTrailingWhitespace?: boolean
+	/** Stop after this many matches; ambiguity checks normally need only two. */
+	maxMatches?: number
 }): TextMatch[] {
 	if (!args.needle) {
 		throw new Error("old_str non-empty required")
 	}
 
 	// Tier 1: Exact match
-	const exact = findExactMatches(args.source, args.needle)
+	const maxMatches = Math.max(1, args.maxMatches ?? Number.POSITIVE_INFINITY)
+	const exact = findExactMatches(args.source, args.needle, maxMatches)
 	if (exact.length > 0) return exact
 
 	// Tier 2: EOL normalized
-	const eolNorm = findEolNormalizedMatches(args.source, args.needle)
+	const eolNorm = findEolNormalizedMatches(args.source, args.needle, maxMatches)
 	if (eolNorm.length > 0) return eolNorm
 
 	// Tier 3: Trailing whitespace normalized
 	if (args.allowTrailingWhitespace !== false) {
-		const trNorm = findTrailingWhitespaceNormalizedMatches(args.source, args.needle)
+		const trNorm = findTrailingWhitespaceNormalizedMatches(args.source, args.needle, maxMatches)
 		if (trNorm.length > 0) return trNorm
 	}
 

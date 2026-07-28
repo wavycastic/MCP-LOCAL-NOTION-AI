@@ -7,9 +7,12 @@
  * stage dung phan agent lam, khong hon.
  */
 
+import { invalidateGlobCache } from "./tools/globFiles.js"
+
 const touched = new Map<string, Set<string>>()
 
 export function noteTouched(root: string, ...paths: string[]): void {
+	invalidateGlobCache(root)
 	let set = touched.get(root)
 	if (!set) {
 		set = new Set()

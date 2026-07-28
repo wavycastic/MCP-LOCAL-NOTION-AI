@@ -86,7 +86,7 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 				const oldBlock = oldLines.join("\n")
 				const newBlock = newLines.join("\n")
 
-				const matches = findTextMatches({ source: currentSrc, needle: oldBlock })
+				const matches = findTextMatches({ source: currentSrc, needle: oldBlock, maxMatches: 2 })
 				const n = matches.length
 
 				const headerMsg = hunk.header ? ` (header: @@ ${hunk.header})` : ""
