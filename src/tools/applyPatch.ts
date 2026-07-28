@@ -8,7 +8,7 @@ import { buildPlan } from "../patch/apply.js"
 import { parsePatch } from "../patch/parser.js"
 import type { FileSnapshot, PlannedChange } from "../patch/types.js"
 import { mapLimit } from "../files/concurrency.js"
-import { readTextSnapshot } from "../files/text.js"
+import { readTextSnapshot, readTextSnapshotAsync } from "../files/text.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath, safeResolve, safeResolveNew } from "../security/paths.js"
 import { noteTouched } from "../touched.js"
@@ -136,17 +136,16 @@ export async function applyPatch(a: {
 		}
 	}
 
-	// Phase C: Snapshot Collection & Validation
+	// Phase C: collect independent snapshots with bounded concurrency.
 	const snapshots = new Map<string, FileSnapshot>()
-
-	for (const op of parsed.operations) {
+	const collectedSnapshots = await mapLimit(parsed.operations, 8, async (op) => {
 		if (op.kind === "add") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
 			const abs = safeResolveNew(repo.root, op.path)
 			if (existsSync(abs)) {
 				throw new Error(`apply_patch verification failed: Add File target da ton tai: '${op.path}'`)
 			}
-			snapshots.set(op.path, { path: op.path, existed: false })
+			return [op.path, { path: op.path, existed: false } satisfies FileSnapshot] as const
 		} else if (op.kind === "delete") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
 			const abs = safeResolve(repo.root, op.path)
@@ -155,15 +154,15 @@ export async function applyPatch(a: {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
 			try {
-				const snap = readTextSnapshot(abs)
-				snapshots.set(op.path, {
+				const snap = await readTextSnapshotAsync(abs)
+				return [op.path, {
 					path: op.path,
 					existed: true,
 					content: snap.text,
 					sha256: snap.sha256,
 					mode: snap.mode,
 					buffer: snap.buffer,
-				})
+				} satisfies FileSnapshot] as const
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
@@ -184,8 +183,8 @@ export async function applyPatch(a: {
 			}
 
 			try {
-				const snap = readTextSnapshot(srcAbs)
-				snapshots.set(op.path, {
+				const snap = await readTextSnapshotAsync(srcAbs)
+				return [op.path, {
 					path: op.path,
 					existed: true,
 					content: snap.text,
@@ -194,12 +193,14 @@ export async function applyPatch(a: {
 					bom: snap.bom,
 					mode: snap.mode,
 					buffer: snap.buffer,
-				})
+				} satisfies FileSnapshot] as const
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
 		}
-	}
+		throw new Error("apply_patch verification failed: unsupported operation")
+	})
+	for (const [path, snapshot] of collectedSnapshots) snapshots.set(path, snapshot)
 
 	// Validate expected_files hashes if provided (with deny-list check and no hash oracle leak)
 	if (a.expected_files) {
