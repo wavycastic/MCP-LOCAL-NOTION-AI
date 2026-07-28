@@ -85,6 +85,7 @@ const { ripgrep } = await import("../src/tools/ripgrep.js")
 const { createFile } = await import("../src/tools/createFile.js")
 const { editFile } = await import("../src/tools/editFile.js")
 const { multiEditFile } = await import("../src/tools/multiEditFile.js")
+const { applyPatch } = await import("../src/tools/applyPatch.js")
 const { removeFile } = await import("../src/tools/removeFile.js")
 const { gitCommit } = await import("../src/tools/gitCommit.js")
 const { gitRestore } = await import("../src/tools/gitRestore.js")
@@ -298,6 +299,95 @@ await multiEditFile({
 		{ old_str: "\nconst b = 20", new_str: "" },
 	],
 })
+
+// —— apply_patch ——
+console.log("\napply_patch")
+const apAdd = await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Add File: src/patched.ts\n+export const patched = true\n*** End Patch`,
+})
+ok("apply_patch Add File thanh cong", apAdd.files_changed === 1)
+ok("file moi da duoc tao bang apply_patch", (await readFile({ repo: "demo", path: "src/patched.ts" })).text.includes("patched = true"))
+
+const apDry = await applyPatch({
+	repo: "demo",
+	dry_run: true,
+	patch_text: `*** Begin Patch\n*** Update File: src/patched.ts\n@@\n-export const patched = true\n+export const patched = "dry_run"\n*** End Patch`,
+})
+ok("apply_patch dry_run tra va summary", apDry.dry_run === true && apDry.files_changed === 1)
+ok("dry_run KHONG thay doi file tren o dia", (await readFile({ repo: "demo", path: "src/patched.ts" })).text.includes("patched = true"))
+
+const apMove = await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Update File: src/patched.ts\n*** Move to: src/moved.ts\n@@\n-export const patched = true\n+export const patched = "moved"\n*** End Patch`,
+})
+ok("apply_patch Move File thanh cong", apMove.files_changed === 1)
+ok("file khong con o path cu", !(await listDir({ repo: "demo", path: "src" })).entries.some((c) => c.name === "patched.ts"))
+ok("file da o path moi voi noi dung da update", (await readFile({ repo: "demo", path: "src/moved.ts" })).text.includes("moved"))
+
+const apDel = await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Delete File: src/moved.ts\n*** End Patch`,
+})
+ok("apply_patch Delete File thanh cong", apDel.files_changed === 1)
+
+await denies(
+	"apply_patch pre-validation chan khi 1 hunk sai (all-or-nothing)",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 100\n*** Update File: README.md\n@@\n-non_existent_text_12345\n+replacement\n*** End Patch`,
+		}),
+	"verification failed",
+)
+ok("file src/a.ts KHONG bi thay doi khi patch bi pre-validation reject", (await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("a = 2"))
+
+await denies(
+	"apply_patch chan path traversal ../",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Add File: ../outside.ts\n+bad\n*** End Patch`,
+		}),
+	"escapes repo root",
+)
+
+await denies(
+	"apply_patch chan deny-list .env",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Add File: .env\n+SECRET=123\n*** End Patch`,
+		}),
+	"denied path",
+)
+
+await denies(
+	"apply_patch chan repo read-only",
+	() =>
+		applyPatch({
+			repo: "refonly",
+			patch_text: `*** Begin Patch\n*** Add File: test.txt\n+hello\n*** End Patch`,
+		}),
+	"chi-doc",
+)
+
+await denies(
+	"apply_patch chan khi expected_files.sha256 mismatch",
+	() =>
+		applyPatch({
+			repo: "demo",
+			expected_files: [{ path: "src/a.ts", sha256: "0000000000000000000000000000000000000000000000000000000000000000" }],
+			patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** End Patch`,
+		}),
+	"expected_files sha256 mismatch",
+)
+
+const redactedLog = redactForAudit({ patch_text: "*** Begin Patch\nsecret\n*** End Patch" })
+ok("audit log redact patch_text", typeof redactedLog === "object" && (redactedLog as any).patch_text.includes("khong ghi noi dung"))
+
+const { forgetTouched } = await import("../src/touched.js")
+forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts")
 
 // —— Git ——
 console.log("\ngit")

@@ -4,6 +4,7 @@ import { withLock } from "../lock.js"
 import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
 import { createFile, createFileSchema } from "./createFile.js"
+import { applyPatch, applyPatchSchema } from "./applyPatch.js"
 import { editFile, editFileSchema } from "./editFile.js"
 import { multiEditFile, multiEditFileSchema } from "./multiEditFile.js"
 import { ghPr, ghPrSchema } from "./ghPr.js"
@@ -108,6 +109,7 @@ export function registerAll(s: McpServer) {
 	// —— Sua file (chi repo co write: true) ——
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace 1 vi tri. CHU Y: Neu can sua nhieu vi tri trong file, KHONG GOI NHOI NHOI tool nay nhieu lan, hay dung multi_edit_file de sua tat ca trong 1 lan goi duy nhat.", editFileSchema, editFile)
 	reg(s, "multi_edit_file", "Sua NHIEU VI TRI trong 1 file trong 1 LAN GOI DUY NHAT (nguyen tu: all-or-nothing). Nhan mang edits: [{ old_str, new_str, replace_all? }]. Nhan expected_sha256 de chong troi troot code.", multiEditFileSchema, multiEditFile)
+	reg(s, "apply_patch", "Ap dung mot patch gom nhieu hunk hoac nhieu file (Add, Update, Move, Delete) trong mot thao tac duy nhat. Pre-validate toan bo patch tren RAM truoc khi ghi. Dung edit_file cho 1 thay doi nho va multi_edit_file cho nhieu thay doi trong 1 file.", applyPatchSchema, applyPatch, { destructive: true })
 	reg(s, "create_file", "Tao file MOI voi noi dung day du. Bao loi neu file da ton tai (sua file cu thi dung edit_file). Dung khi tach class/module ra file rieng.", createFileSchema, createFile)
 	reg(s, "move_file", "Doi ten / di chuyen file bang git mv, giu history va blame. Khong di chuyen cheo repo.", moveFileSchema, moveFile)
 	reg(s, "remove_file", "Xoa file da track bang git rm. Chi dung khi da chac khong con reference nao (kiem tra bang code graph hoac ripgrep truoc).", removeFileSchema, removeFile, { destructive: true })

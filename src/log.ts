@@ -5,7 +5,7 @@ const MAX_BYTES = 5_000_000 // rotate 1 vong: audit.log -> audit.log.1
 const MAX_STRING = 200 // do dai toi da cho moi truong string
 
 /** Truong luon chua noi dung file, khong bao gio duoc ghi nguyen van. */
-const ALWAYS_ELIDE = new Set(["content", "new_str", "old_str", "command"])
+const ALWAYS_ELIDE = new Set(["content", "new_str", "old_str", "command", "patch_text"])
 
 /**
  * `create_file` nhan nguyen noi dung file trong args. Ghi thang args vao log

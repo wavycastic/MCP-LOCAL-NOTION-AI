@@ -1,0 +1,330 @@
+import { createHash } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { z } from "zod"
+import { assertGitRepo, assertWritableBranch } from "../git.js"
+import { run } from "../exec.js"
+import { buildPlan } from "../patch/apply.js"
+import { parsePatch } from "../patch/parser.js"
+import type { FileSnapshot, PatchPlan, PlannedChange } from "../patch/types.js"
+import { resolveRepo } from "../repos.js"
+import { isDeniedRelPath, safeResolve, safeResolveNew } from "../security/paths.js"
+import { noteTouched } from "../touched.js"
+
+export const applyPatchSchema = {
+	repo: z.string().optional().describe("Ten repo (xem list_repos). Repo phai duoc cap quyen ghi"),
+	patch_text: z
+		.string()
+		.describe("Noi dung patch bat dau bang '*** Begin Patch' va ket thuc bang '*** End Patch'"),
+	dry_run: z
+		.boolean()
+		.optional()
+		.describe("Mac dinh false. Neu true, chi validate va tinh toán summary/diff, khong ghi len o dia"),
+	expected_head_sha: z
+		.string()
+		.optional()
+		.describe("Tuoy chon: SHA commit HEAD hien tai cua Git repo. Neu khong khop, tu choi toàn bo patch"),
+	expected_files: z
+		.array(
+			z.object({
+				path: z.string().describe("Duong dan tuong doi so voi repo root"),
+				sha256: z.string().describe("Hash SHA-256 ky vong cua file"),
+			}),
+		)
+		.optional()
+		.describe("Tuong hop chong stale: hash sha256 ky vong cua cac file lien quan truoc khi sua"),
+}
+
+function isCrlf(raw: string): boolean {
+	const crlf = (raw.match(/\r\n/g) ?? []).length
+	if (crlf === 0) return false
+	const lfTotal = (raw.match(/\n/g) ?? []).length
+	return crlf >= lfTotal - crlf
+}
+
+function generateDiff(changes: PlannedChange[]): string {
+	const lines: string[] = []
+	for (const change of changes) {
+		if (change.type === "add") {
+			lines.push(`--- /dev/null`)
+			lines.push(`+++ b/${change.path}`)
+			lines.push(`@@ -0,0 +1,${change.newContent.split("\n").length} @@`)
+			for (const line of change.newContent.split("\n")) {
+				lines.push(`+${line}`)
+			}
+		} else if (change.type === "delete") {
+			lines.push(`--- a/${change.path}`)
+			lines.push(`+++ /dev/null`)
+			lines.push(`@@ -1,${change.oldContent.split("\n").length} +0,0 @@`)
+			for (const line of change.oldContent.split("\n")) {
+				lines.push(`-${line}`)
+			}
+		} else if (change.type === "update") {
+			lines.push(`--- a/${change.path}`)
+			lines.push(`+++ b/${change.path}`)
+			lines.push(`@@ update ${change.replacements} hunk(s) @@`)
+		} else if (change.type === "move") {
+			lines.push(`--- a/${change.from}`)
+			lines.push(`+++ b/${change.to}`)
+			lines.push(`@@ move and update ${change.replacements} hunk(s) @@`)
+		}
+	}
+	return lines.join("\n")
+}
+
+export async function applyPatch(a: {
+	repo?: string
+	patch_text: string
+	dry_run?: boolean
+	expected_head_sha?: string
+	expected_files?: Array<{ path: string; sha256: string }>
+}) {
+	// Phase A: Parse
+	const parsed = parsePatch(a.patch_text)
+
+	// Phase B: Security & Repository Validation
+	const repo = resolveRepo(a.repo)
+	const branch = await assertWritableBranch(repo)
+
+	// Git HEAD check if expected_head_sha provided
+	if (a.expected_head_sha) {
+		try {
+			const rev = await run(["git", "rev-parse", "HEAD"], { cwd: repo.root })
+			const currentHead = rev.stdout.trim()
+			if (currentHead !== a.expected_head_sha && !currentHead.startsWith(a.expected_head_sha)) {
+				throw new Error(
+					`expected_head_sha mismatch for repo '${repo.name}'. Expected: ${a.expected_head_sha}, Actual: ${currentHead}`,
+				)
+			}
+		} catch (e: any) {
+			if (e.message?.includes("expected_head_sha mismatch")) throw e
+			throw new Error(`Khong the kiem tra expected_head_sha: ${e.message ?? e}`)
+		}
+	}
+
+	// Detect target path conflicts
+	const targets = new Set<string>()
+	const sources = new Set<string>()
+
+	for (const op of parsed.operations) {
+		if (op.kind === "add") {
+			if (targets.has(op.path)) throw new Error(`apply_patch conflict: Path target bi trung: '${op.path}'`)
+			targets.add(op.path)
+		} else if (op.kind === "delete") {
+			if (sources.has(op.path)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
+			sources.add(op.path)
+		} else if (op.kind === "update") {
+			if (sources.has(op.path)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
+			sources.add(op.path)
+			if (op.moveTo) {
+				if (targets.has(op.moveTo))
+					throw new Error(`apply_patch conflict: Path move target bi trung: '${op.moveTo}'`)
+				targets.add(op.moveTo)
+			} else {
+				targets.add(op.path)
+			}
+		}
+	}
+
+	// Phase C: Snapshot Collection & Validation
+	const snapshots = new Map<string, FileSnapshot>()
+
+	for (const op of parsed.operations) {
+		if (op.kind === "add") {
+			const abs = safeResolveNew(repo.root, op.path)
+			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			if (existsSync(abs)) {
+				throw new Error(`apply_patch verification failed: Add File target da ton tai: '${op.path}'`)
+			}
+			snapshots.set(op.path, { path: op.path, existed: false })
+		} else if (op.kind === "delete") {
+			const abs = safeResolve(repo.root, op.path)
+			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			const st = statSync(abs)
+			if (st.isDirectory()) {
+				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
+			}
+			const raw = readFileSync(abs, "utf8")
+			const sha256 = createHash("sha256").update(raw).digest("hex")
+			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256 })
+		} else if (op.kind === "update") {
+			const srcAbs = safeResolve(repo.root, op.path)
+			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
+			const st = statSync(srcAbs)
+			if (st.isDirectory()) {
+				throw new Error(`apply_patch verification failed: Update File khong ho tro thu muc: '${op.path}'`)
+			}
+
+			if (op.moveTo) {
+				const destAbs = safeResolveNew(repo.root, op.moveTo)
+				if (isDeniedRelPath(op.moveTo)) throw new Error(`Path nam trong deny-list: '${op.moveTo}'`)
+				if (existsSync(destAbs)) {
+					throw new Error(`apply_patch verification failed: Move target da ton tai: '${op.moveTo}'`)
+				}
+			}
+
+			const raw = readFileSync(srcAbs, "utf8")
+			const sha256 = createHash("sha256").update(raw).digest("hex")
+			const eol = isCrlf(raw) ? "crlf" : "lf"
+			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256, eol })
+		}
+	}
+
+	// Validate expected_files hashes if provided
+	if (a.expected_files) {
+		for (const ef of a.expected_files) {
+			const abs = safeResolve(repo.root, ef.path)
+			const raw = readFileSync(abs, "utf8")
+			const actualHash = createHash("sha256").update(raw).digest("hex")
+			if (actualHash !== ef.sha256) {
+				throw new Error(
+					`expected_files sha256 mismatch cho '${ef.path}'. Expected: ${ef.sha256}, Actual: ${actualHash}`,
+				)
+			}
+		}
+	}
+
+	// Phase D: Build Plan in RAM
+	const plan = buildPlan(parsed.operations, snapshots)
+
+	// Phase E: Dry Run
+	const fullDiff = generateDiff(plan.changes)
+	const diffTruncated = fullDiff.length > 50_000
+	const diffSummary = diffTruncated ? fullDiff.slice(0, 50_000) + "\n... [diff truncated]" : fullDiff
+
+	if (a.dry_run) {
+		return {
+			repo: repo.name,
+			branch,
+			dry_run: true,
+			files_changed: plan.changes.length,
+			additions: plan.totalAdditions,
+			deletions: plan.totalDeletions,
+			changes: plan.changes.map((c) => ({
+				operation: c.type,
+				path: c.type === "move" ? c.to : c.path,
+				from: c.type === "move" ? c.from : undefined,
+				to: c.type === "move" ? c.to : undefined,
+				bytes_before: c.type === "add" ? 0 : c.bytesBefore,
+				bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
+				sha256_before: c.type === "add" ? undefined : c.sha256Before,
+				sha256_after: c.type === "delete" ? undefined : c.sha256After,
+				replacements: "replacements" in c ? c.replacements : undefined,
+			})),
+			diff: diffSummary,
+			diff_truncated: diffTruncated,
+		}
+	}
+
+	// Phase F: Commit Plan via Atomic Temp-File Write & Rollback Best-Effort
+	const writtenTemps: Array<{ tmpPath: string; targetAbs: string }> = []
+	const touchedPaths: string[] = []
+
+	try {
+		// Step 1: Write all new/updated contents to temporary files
+		for (const change of plan.changes) {
+			if (change.type === "add") {
+				const abs = safeResolveNew(repo.root, change.path)
+				mkdirSync(dirname(abs), { recursive: true })
+				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+				writeFileSync(tmpPath, change.newContent, "utf8")
+				writtenTemps.push({ tmpPath, targetAbs: abs })
+				touchedPaths.push(change.path)
+			} else if (change.type === "update") {
+				const abs = safeResolve(repo.root, change.path)
+				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+				writeFileSync(tmpPath, change.newContent, "utf8")
+				writtenTemps.push({ tmpPath, targetAbs: abs })
+				touchedPaths.push(change.path)
+			} else if (change.type === "move") {
+				const destAbs = safeResolveNew(repo.root, change.to)
+				mkdirSync(dirname(destAbs), { recursive: true })
+				const tmpPath = `${destAbs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+				writeFileSync(tmpPath, change.newContent, "utf8")
+				writtenTemps.push({ tmpPath, targetAbs: destAbs })
+				touchedPaths.push(change.from)
+				touchedPaths.push(change.to)
+			} else if (change.type === "delete") {
+				touchedPaths.push(change.path)
+			}
+		}
+
+		// Step 2: Atomic rename temp files into targets
+		for (const { tmpPath, targetAbs } of writtenTemps) {
+			renameSync(tmpPath, targetAbs)
+		}
+
+		// Step 3: Perform deletes and move source unlinks
+		for (const change of plan.changes) {
+			if (change.type === "delete") {
+				const abs = safeResolve(repo.root, change.path)
+				if (existsSync(abs)) unlinkSync(abs)
+			} else if (change.type === "move") {
+				const srcAbs = safeResolve(repo.root, change.from)
+				if (existsSync(srcAbs)) unlinkSync(srcAbs)
+			}
+		}
+	} catch (commitErr: any) {
+		// Rollback best-effort
+		let rollbackSuccess = true
+		try {
+			// Remove temporary files
+			for (const { tmpPath } of writtenTemps) {
+				if (existsSync(tmpPath)) {
+					try {
+						unlinkSync(tmpPath)
+					} catch {}
+				}
+			}
+			// Restore original contents from snapshots
+			for (const change of plan.changes) {
+				if (change.type === "add") {
+					const abs = safeResolveNew(repo.root, change.path)
+					if (existsSync(abs)) unlinkSync(abs)
+				} else if (change.type === "update" || change.type === "move") {
+					const srcPath = change.type === "move" ? change.from : change.path
+					const abs = safeResolve(repo.root, srcPath)
+					writeFileSync(abs, change.oldContent, "utf8")
+					if (change.type === "move") {
+						const destAbs = safeResolveNew(repo.root, change.to)
+						if (existsSync(destAbs)) unlinkSync(destAbs)
+					}
+				}
+			}
+		} catch (rbErr) {
+			rollbackSuccess = false
+		}
+
+		throw new Error(
+			`apply_patch commit phase failed (${commitErr.message ?? commitErr}). ` +
+				`Rollback status: ${rollbackSuccess ? "THANH CONG (files da duoc khoi phuc)" : "KHONG HOAN CHINH (can kiem tra lai working tree)"}`,
+		)
+	}
+
+	// Notify touched paths
+	for (const p of touchedPaths) {
+		noteTouched(repo.root, p)
+	}
+
+	return {
+		repo: repo.name,
+		branch,
+		dry_run: false,
+		files_changed: plan.changes.length,
+		additions: plan.totalAdditions,
+		deletions: plan.totalDeletions,
+		changes: plan.changes.map((c) => ({
+			operation: c.type,
+			path: c.type === "move" ? c.to : c.path,
+			from: c.type === "move" ? c.from : undefined,
+			to: c.type === "move" ? c.to : undefined,
+			bytes_before: c.type === "add" ? 0 : c.bytesBefore,
+			bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
+			sha256_before: c.type === "add" ? undefined : c.sha256Before,
+			sha256_after: c.type === "delete" ? undefined : c.sha256After,
+			replacements: "replacements" in c ? c.replacements : undefined,
+		})),
+		diff: diffSummary,
+		diff_truncated: diffTruncated,
+	}
+}
