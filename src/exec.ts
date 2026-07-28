@@ -9,6 +9,8 @@ export type ExecResult = {
 	stdout: string
 	stderr: string
 	timedOut: boolean
+	outputTruncated: boolean
+	outputBytesSeen: number
 }
 
 function resolveCmd(cmd: string): string {
@@ -80,27 +82,18 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecrets = false): Record<string, string> {
 	if (extraEnv) {
 		const keys = Object.keys(extraEnv)
-		if (keys.length > 100) {
-			throw new Error("Too many environment variables (max 100 entries allowed)")
-		}
+		if (keys.length > 100) throw new Error("Too many environment variables (max 100 entries allowed)")
 		for (const [k, v] of Object.entries(extraEnv)) {
-			if (k.length > 200) {
-				throw new Error(`Environment key '${k.slice(0, 20)}...' exceeds 200 characters limit`)
-			}
-			if (v.length > 4000) {
-				throw new Error(`Environment value for '${k}' exceeds 4000 characters limit`)
-			}
+			if (k.length > 200) throw new Error(`Environment key '${k.slice(0, 20)}...' exceeds 200 characters limit`)
+			if (v.length > 4000) throw new Error(`Environment value for '${k}' exceeds 4000 characters limit`)
 		}
 	}
 
 	const base = childEnv(extraEnv)
 	const out: Record<string, string> = {}
-
 	for (const [k, v] of Object.entries(base)) {
 		if (v === undefined) continue
-		if (!inheritSecrets && SECRET_KEY_PATTERN.test(k)) {
-			continue
-		}
+		if (!inheritSecrets && SECRET_KEY_PATTERN.test(k)) continue
 		out[k] = v
 	}
 	delete out.MCP_TOKEN
@@ -110,9 +103,7 @@ export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecre
 export function killTree(p: ChildProcess): void {
 	if (process.platform === "win32" && p.pid) {
 		try {
-			const k = spawn("taskkill", ["/pid", String(p.pid), "/T", "/F"], {
-				stdio: "ignore",
-			})
+			const k = spawn("taskkill", ["/pid", String(p.pid), "/T", "/F"], { stdio: "ignore" })
 			k.on("error", () => p.kill("SIGKILL"))
 			return
 		} catch {
@@ -135,10 +126,7 @@ export function run(
 	const [rawCmd, ...rawArgs] = argv
 	if (!rawCmd) throw new Error("argv rong")
 
-	const cwd0 =
-		opts.cwd === FULL_ACCESS_ROOT
-			? (process.env.FULL_ACCESS_CWD ?? process.cwd())
-			: opts.cwd
+	const cwd0 = opts.cwd === FULL_ACCESS_ROOT ? (process.env.FULL_ACCESS_CWD ?? process.cwd()) : opts.cwd
 	if (!existsSync(cwd0)) {
 		throw new Error(
 			`cwd khong ton tai: "${cwd0}" (repo root khong hop le). ` +
@@ -147,49 +135,53 @@ export function run(
 	}
 
 	const resolved = resolveCmd(rawCmd)
-
 	const viaCmd =
 		process.platform === "win32" &&
-		(resolved.endsWith(".cmd") ||
-			resolved.endsWith(".bat") ||
-			WIN_BUILTINS.has(rawCmd.toLowerCase()))
+		(resolved.endsWith(".cmd") || resolved.endsWith(".bat") || WIN_BUILTINS.has(rawCmd.toLowerCase()))
 
 	if (viaCmd) {
 		for (const a of rawArgs) {
-			if (CMD_META.test(a))
+			if (CMD_META.test(a)) {
 				throw new Error(
 					`tham so "${a}" chua ky tu ma cmd.exe se dien giai (& | < > ^ " %). ` +
 						`Tu choi chay "${rawCmd}" de khong bien tham so thanh lenh thu hai`,
 				)
+			}
 		}
 	}
 
 	const cmd = viaCmd ? process.env.ComSpec || "cmd.exe" : resolved
 	const args = viaCmd ? ["/d", "/s", "/c", rawCmd, ...rawArgs] : rawArgs
-	const maxOutput = opts.maxOutputBytes ?? MAX_OUTPUT
+	const configuredLimit = opts.maxOutputBytes ?? MAX_OUTPUT
+	const maxOutput = Number.isFinite(configuredLimit) ? Math.max(0, Math.floor(configuredLimit)) : MAX_OUTPUT
 
 	return new Promise((res, rej) => {
-		const p = spawn(cmd, args, {
-			cwd: cwd0,
-			shell: false,
-			env: childEnv(opts.env),
-		})
+		const p = spawn(cmd, args, { cwd: cwd0, shell: false, env: childEnv(opts.env) })
 		opts.onSpawn?.(p)
 
-		let out = ""
-		let err = ""
+		const outChunks: Buffer[] = []
+		const errChunks: Buffer[] = []
+		let capturedBytes = 0
+		let outputBytesSeen = 0
 		let timedOut = false
+
+		const capture = (target: Buffer[], data: Buffer | string) => {
+			const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
+			outputBytesSeen += buf.length
+			const remaining = maxOutput - capturedBytes
+			if (remaining <= 0) return
+			const part = buf.subarray(0, Math.min(remaining, buf.length))
+			target.push(part)
+			capturedBytes += part.length
+		}
+
 		const t = setTimeout(() => {
 			timedOut = true
 			killTree(p)
 		}, opts.timeoutMs ?? EXEC_TIMEOUT_MS)
 
-		p.stdout.on("data", (d) => {
-			if (out.length < maxOutput) out += d.toString()
-		})
-		p.stderr.on("data", (d) => {
-			if (err.length < maxOutput) err += d.toString()
-		})
+		p.stdout.on("data", (d) => capture(outChunks, d))
+		p.stderr.on("data", (d) => capture(errChunks, d))
 		p.on("error", (e) => {
 			clearTimeout(t)
 			rej(e)
@@ -198,9 +190,11 @@ export function run(
 			clearTimeout(t)
 			res({
 				code,
-				stdout: out.slice(0, maxOutput),
-				stderr: err.slice(0, maxOutput),
+				stdout: Buffer.concat(outChunks).toString("utf8"),
+				stderr: Buffer.concat(errChunks).toString("utf8"),
 				timedOut,
+				outputTruncated: outputBytesSeen > capturedBytes,
+				outputBytesSeen,
 			})
 		})
 	})
