@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
 
-const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
+export const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
 
 const DENY: RegExp[] = [
 	/(^|\/)\.env(\..*)?$/,
