@@ -54,20 +54,52 @@ function rootDir(): string {
 	return app.getAppPath()
 }
 
-function repoRoot(): string {
-	const candidates = [
-		process.env.PORTABLE_EXECUTABLE_DIR,
-		app.isPackaged ? dirname(dirname(process.execPath)) : null,
-		app.isPackaged ? dirname(process.execPath) : null,
-		process.cwd(),
-		app.getAppPath(),
-	].filter((d): d is string => !!d && typeof d === "string")
+/**
+ * Cac thu muc co the chua cau hinh THAT cua nguoi dung, theo do uu tien.
+ *
+ * app.getAppPath() co y KHONG nam trong day: electron-builder copy repos.json vao
+ * resources/app, nen neu de appPath thang thi ban dong goi luon thang cau hinh
+ * that — sua repos.json trong project khong con tac dung, va .env that
+ * (WORKSPACE_ROOT, FULL_ACCESS_CWD, token) bi bo qua. appPath chi la duong lui
+ * cuoi cung trong repoRoot().
+ */
+function configDirCandidates(): string[] {
+	const out: string[] = []
+	const push = (d?: string | null) => {
+		if (d && typeof d === "string" && !out.includes(d)) out.push(d)
+	}
 
-	for (const dir of candidates) {
-		if (existsSync(join(dir, "repos.json")) || existsSync(join(dir, ".env"))) {
-			return dir
+	push(process.env.LOCAL_REPO_MCP_HOME)
+	push(process.env.PORTABLE_EXECUTABLE_DIR)
+	if (app.isPackaged) {
+		// Ban portable thuong nam trong release/win-unpacked cua chinh project, nen
+		// cau hinh that o mot trong cac thu muc cha. Gioi han 4 cap cho khoi leo ra
+		// tan goc o dia.
+		let dir = dirname(process.execPath)
+		for (let i = 0; i < 4; i++) {
+			push(dir)
+			const parent = dirname(dir)
+			if (parent === dir) break
+			dir = parent
 		}
 	}
+	push(process.cwd())
+	return out
+}
+
+function repoRoot(): string {
+	const candidates = configDirCandidates()
+	// .env truoc repos.json: .env la thu chi nguoi dung tao, con repos.json co the
+	// la ban mac dinh di kem app.
+	for (const dir of candidates) {
+		if (existsSync(join(dir, ".env"))) return dir
+	}
+	for (const dir of candidates) {
+		if (existsSync(join(dir, "repos.json"))) return dir
+	}
+
+	const appDir = app.getAppPath()
+	if (existsSync(join(appDir, "repos.json")) || existsSync(join(appDir, ".env"))) return appDir
 	return app.isPackaged ? dirname(process.execPath) : process.cwd()
 }
 

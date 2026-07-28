@@ -61,11 +61,14 @@ function findReposConfig(): string {
 		const envPath = resolve(appDir, process.env.REPOS_CONFIG)
 		if (existsSync(envPath)) return envPath
 	}
+	// appDir xuong duoi cung: trong ban dong goi day la resources/app, chi chua ban
+	// repos.json mac dinh di kem app. Cau hinh that cua nguoi dung nam ngoai bundle.
 	const candidates = [
-		resolve(appDir, "repos.json"),
 		resolve(process.cwd(), "repos.json"),
+		...(process.env.LOCAL_REPO_MCP_HOME ? [resolve(process.env.LOCAL_REPO_MCP_HOME, "repos.json")] : []),
 		...(process.env.PORTABLE_EXECUTABLE_DIR ? [resolve(process.env.PORTABLE_EXECUTABLE_DIR, "repos.json")] : []),
 		resolve(dirname(appDir), "repos.json"),
+		resolve(appDir, "repos.json"),
 	]
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) return candidate
