@@ -84,6 +84,7 @@ const { listDir } = await import("../src/tools/listDir.js")
 const { ripgrep } = await import("../src/tools/ripgrep.js")
 const { createFile } = await import("../src/tools/createFile.js")
 const { editFile } = await import("../src/tools/editFile.js")
+const { multiEditFile } = await import("../src/tools/multiEditFile.js")
 const { removeFile } = await import("../src/tools/removeFile.js")
 const { gitCommit } = await import("../src/tools/gitCommit.js")
 const { gitRestore } = await import("../src/tools/gitRestore.js")
@@ -245,6 +246,58 @@ ok(
 	"file khong bi sua khi vuot tran",
 	(await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("a = 2"),
 )
+
+await editFile({ repo: "demo", path: "src/a.ts", old_str: "const a = 2", new_str: "const a = 2\nconst b = 5" })
+
+const me1 = await multiEditFile({
+	repo: "demo",
+	path: "src/a.ts",
+	edits: [
+		{ old_str: "const a = 2", new_str: "const a = 10" },
+		{ old_str: "const b = 5", new_str: "const b = 20" },
+	],
+})
+ok("multi_edit_file thay nhieu vi tri thanh cong", me1.total_edits === 2 && me1.edits.length === 2)
+const meText = (await readFile({ repo: "demo", path: "src/a.ts" })).text
+ok("noi dung da duoc multi_edit cap nhat", meText.includes("a = 10") && meText.includes("b = 20"))
+
+await denies(
+	"multi_edit_file atomic rollback khi 1 edit that bai",
+	() =>
+		multiEditFile({
+			repo: "demo",
+			path: "src/a.ts",
+			edits: [
+				{ old_str: "const a = 10", new_str: "const a = 999" },
+				{ old_str: "doan_khong_ton_tai_123", new_str: "xxx" },
+			],
+		}),
+	"ROLLBACK",
+)
+const meRollbackText = (await readFile({ repo: "demo", path: "src/a.ts" })).text
+ok("file KHONG bi thay doi khi batch edit bi rollback", meRollbackText.includes("a = 10") && !meRollbackText.includes("a = 999"))
+
+await denies(
+	"multi_edit_file chan khi expected_sha256 mismatch",
+	() =>
+		multiEditFile({
+			repo: "demo",
+			path: "src/a.ts",
+			expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+			edits: [{ old_str: "const a = 10", new_str: "const a = 100" }],
+		}),
+	"expected_sha256 mismatch",
+)
+
+// Tra src/a.ts ve trang thai ban dau cho cac test tiep theo (git commit, git restore)
+await multiEditFile({
+	repo: "demo",
+	path: "src/a.ts",
+	edits: [
+		{ old_str: "const a = 10", new_str: "const a = 2" },
+		{ old_str: "\nconst b = 20", new_str: "" },
+	],
+})
 
 // —— Git ——
 console.log("\ngit")
