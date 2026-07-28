@@ -72,13 +72,24 @@ function repoRoot(): string {
 }
 
 function readEnvValue(key: string): string | null {
+	return readEnvFile()[key] ?? null
+}
+
+function readEnvFile(): Record<string, string> {
 	const p = join(repoRoot(), ".env")
-	if (!existsSync(p)) return null
+	if (!existsSync(p)) return {}
+	const envs: Record<string, string> = {}
 	for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
-		const m = line.match(new RegExp(`^${key}=([^#]*)`))
-		if (m) return m[1].trim()
+		const trimmed = line.trim()
+		if (!trimmed || trimmed.startsWith("#")) continue
+		const idx = trimmed.indexOf("=")
+		if (idx > 0) {
+			const key = trimmed.slice(0, idx).trim()
+			const val = trimmed.slice(idx + 1).split("#")[0].trim()
+			envs[key] = val
+		}
 	}
-	return null
+	return envs
 }
 
 function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
@@ -212,9 +223,26 @@ function startMcp(env: Record<string, string>) {
 	const entry = join(rootDir(), "dist", "index.js")
 	if (!existsSync(entry)) throw new Error(`khong tim thay ${entry}. Chay npm run build truoc`)
 	procs.mcp.startedAt = new Date().toISOString()
+
+	const envFile = readEnvFile()
+	const mergedEnv: Record<string, string> = {
+		...envFile,
+		...process.env,
+		...env,
+		...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+	}
+
+	if (!mergedEnv.REPOS_CONFIG) {
+		const reposPath = join(repoRoot(), "repos.json")
+		if (existsSync(reposPath)) mergedEnv.REPOS_CONFIG = reposPath
+	}
+	if (!mergedEnv.FULL_ACCESS_CWD) {
+		mergedEnv.FULL_ACCESS_CWD = mergedEnv.WORKSPACE_ROOT || repoRoot()
+	}
+
 	procs.mcp.child = spawn(process.execPath, [entry], {
 		cwd: repoRoot(),
-		env: { ...process.env, ...env, ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
+		env: mergedEnv,
 		windowsHide: true,
 	})
 	wire("mcp")
@@ -229,9 +257,19 @@ function startGitnexus(env: Record<string, string>) {
 	if (!existsSync(entry)) throw new Error(`khong tim thay ${entry}`)
 	const token = dashboardConfig(env).gitnexusToken
 	procs.gitnexus.startedAt = new Date().toISOString()
+
+	const envFile = readEnvFile()
+	const mergedEnv: Record<string, string> = {
+		...envFile,
+		...process.env,
+		...env,
+		AUTH_TOKEN: token,
+		...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+	}
+
 	procs.gitnexus.child = spawn(process.execPath, [entry, token], {
 		cwd: repoRoot(),
-		env: { ...process.env, ...env, AUTH_TOKEN: token, ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}) },
+		env: mergedEnv,
 		windowsHide: true,
 	})
 	wire("gitnexus")
