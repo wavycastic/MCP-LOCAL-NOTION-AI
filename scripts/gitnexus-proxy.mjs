@@ -1,9 +1,35 @@
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 const TARGET_PORT = 3001;
 const PROXY_PORT = 3000;
 const AUTH_TOKEN = process.argv[2] || process.env.AUTH_TOKEN || "f6e87a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f";
+
+// Helper to kill process tree on Windows/Unix
+function killChild(child) {
+  if (!child || !child.pid) return;
+  if (process.platform === "win32") {
+    try {
+      execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: "ignore" });
+    } catch {}
+  } else {
+    child.kill("SIGKILL");
+  }
+}
+
+// Auto cleanup orphaned process listening on TARGET_PORT before starting
+if (process.platform === "win32") {
+  try {
+    const out = execSync(`netstat -ano | findstr :${TARGET_PORT}`, { encoding: "utf8" });
+    for (const line of out.split("\n")) {
+      const parts = line.trim().split(/\s+/);
+      const pid = parts[parts.length - 1];
+      if (pid && !isNaN(Number(pid)) && Number(pid) > 0) {
+        execSync(`taskkill /pid ${pid} /F`, { stdio: "ignore" });
+      }
+    }
+  } catch {}
+}
 
 console.log(`Starting gitnexus on port ${TARGET_PORT}...`);
 const isWin = process.platform === "win32";
@@ -25,6 +51,13 @@ gitnexus.on("exit", (code) => {
   console.error(`gitnexus process exited with code ${code}`);
   process.exit(code || 1);
 });
+
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    killChild(gitnexus);
+    process.exit(0);
+  });
+}
 
 const server = http.createServer((req, res) => {
   const headers = { ...req.headers };
