@@ -9,14 +9,17 @@ duoc mount nam trong `README.md`.
 src/config.ts          env, khong chua logic
 src/repos.ts           REPO REGISTRY — nguon su that ve repo nao ton tai va quyen gi
 src/toolchain.ts       doan build/test cmd tu file dac trung o root repo
+src/files/text.ts      strict UTF-8 decoding, BOM/EOL detection, SHA-256
+src/files/atomicWrite.ts atomic temp file write, permission preservation, no-op skip
+src/files/matcher.ts   multi-tier matcher (exact -> eol_norm -> trailing_ws_norm) voi offset map
 src/security/paths.ts  chroot theo TUNG repo + deny-list
-src/exec.ts            spawn khong shell, cwd bat buoc
+src/exec.ts            spawn khong shell, cwd bat buoc, buildTerminalEnv secret sanitizer
 src/git.ts             hai cua kiem tra truoc khi ghi
-src/lock.ts            mutex theo tung repo
-src/jobs.ts            job chay dai (build/test background), van di qua mutex
-src/log.ts             audit.log: redact noi dung file + rotate
-src/tools/*.ts         moi tool: schema zod + handler
-src/tools/index.ts     registry: annotations, lock, audit, isError
+src/lock.ts            mutex theo tung repo + job-level leases
+src/jobs.ts            job chay dai (build/test/terminal background), van di qua mutex lease
+src/log.ts             audit.log: redact noi dung file, patch, command, env + rotate
+src/tools/*.ts         moi tool: schema zod + handler (read_many_files, glob_files, terminal...)
+src/tools/index.ts     registry: annotations, lock, audit, isError, compact JSON
 ```
 
 Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo mac dinh" —
@@ -28,25 +31,31 @@ Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo 
    `safeResolve(repo.root, rel)` cho path phai ton tai, `safeResolveNew` cho path se duoc tao,
    `safeResolveDir` cho thu muc (cho phep repo root). Khong bao gio truyen `WORKSPACE_ROOT` lam root —
    lam vay la mo duong cho `../` di cheo giua cac repo.
-2. **Khong bao gio `shell: true`.** Moi lenh chay qua `run(argv, { cwd })` voi argv co dinh.
-3. **Khong tool nao nhan argv/flag tuy y**, ke ca tu `repos.json`: `build`/`test`/`reindex` phai la
+2. **Moi Text Read/Write phai di qua `src/files/text.ts` va `src/files/atomicWrite.ts`.**
+   Tu choi byte NUL va chuoi non-UTF-8. Bieu dien SHA-256 tren Buffer goc va giu nguyen BOM/EOL/mode.
+3. **Matcher trong `src/files/matcher.ts` phai tinh offset map ve string goc.**
+   Khong đuoc split tren chuoi normalized roi replace tren chuoi tho truoc normalize.
+4. **Khong bao gio `shell: true`.** Moi lenh chay qua `run(argv, { cwd })` voi argv co dinh.
+5. **Khong tool nao nhan argv/flag tuy y**, ke ca tu `repos.json`: `build`/`test`/`reindex` phai la
    mang argv va duoc validate trong `repos.ts`.
-4. **Moi tool co ghi phai goi `assertWritableBranch(repo)` o dong dau.** Ham do kiem tra ca
+6. **Terminal commands phai qua `buildTerminalEnv` va check `TERMINAL_MODE`.**
+   Tu dong strip `MCP_TOKEN` va secret variables khoi child process env.
+7. **Moi tool co ghi phai goi `assertWritableBranch(repo)` o dong dau.** Ham do kiem tra ca
    `repo.write` va branch prefix. Khong co ngoai le.
-5. **Repo mac dinh la chi-doc.** Repo tu dong tim thay chi ghi duoc khi `AUTO_DISCOVERED_WRITE=true`;
+8. **Repo mac dinh la chi-doc.** Repo tu dong tim thay chi ghi duoc khi `AUTO_DISCOVERED_WRITE=true`;
    repo trong `repos.json` chi ghi duoc khi `"write": true`. Dung doi mac dinh nay.
-6. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, `git push --force`.**
+9. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, `git push --force`.**
    Local la nguon su that; cac lenh nay xoa dung thu agent vua viet.
    Ngoai le duy nhat da can nhac: `git_restore` chay `git checkout HEAD -- <cac file cu the>`.
    No BAT BUOC path-scoped — chan `.`, `..`, `/`, wildcard, va chan ca file chua track.
    Dung mo rong no thanh dang nhan thu muc hay pattern.
-7. **Khong co `write_file` ghi de ca file.** `create_file` chi tao file moi, `edit_file` chi
-   string-replace. Day la thiet ke, khong phai thieu sot.
-8. **Ten repo la dinh danh, phai duy nhat.** `assertUniqueNames` trong `repos.ts` lam server sap ngay
-   khi trung ten. Dung "sua" bang cach tu them hau to — chon sai repo mot cach im lang te hon nhieu
-   so voi loi cau hinh hien ro.
-9. **`audit.log` khong duoc chua noi dung file.** Truong `content`/`new_str`/`old_str` chi ghi do dai
-   (`redactForAudit`). Them truong moi co the chua du lieu lon thi phai them vao danh sach elide.
+10. **Khong co `write_file` ghi de ca file.** `create_file` chi tao file moi, `edit_file` chi
+    string-replace. Day la thiet ke, khong phai thieu sot.
+11. **Ten repo la dinh danh, phai duy nhat.** `assertUniqueNames` trong `repos.ts` lam server sap ngay
+    khi trung ten. Dung "sua" bang cach tu them hau to — chon sai repo mot cach im lang te hon nhieu
+    so voi loi cau hinh hien ro.
+12. **`audit.log` khong duoc chua noi dung file, patch, command hay env secret.** Truong `content`/`new_str`/`old_str`/`command`/`patch_text`/`env` chi ghi do dai/summary
+    (`redactForAudit`). Them truong moi co the chua du lieu lon thi phai them vao danh sach elide.
 
 ## Them mot tool moi
 
@@ -59,14 +68,15 @@ Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo 
    - `{ readOnly: true }` cho tool chi doc — khong bi serialize qua mutex.
    - bo `readOnly` cho tool co side effect — chay trong `withLock(repo, ...)`.
    - `{ destructive: true }` cho tool xoa du lieu hoac bo thay doi.
+   - `{ openWorld: true }` cho tool terminal/command.
 5. Description la giao dien that voi agent. Viet ro **khi nao dung** va **khi nao dung tool khac**.
    Description kem lam agent dung sai tool, khong phai loi code.
 6. Them assertion vao `scripts/smoke.ts` — ca duong thanh cong va duong bi chan.
 
-## Lenh chay dai
+## Lenh chay dai & Job Leases
 
 Tool chay lenh > 1 phut nen ho tro `background: true`: goi `startJob(repo.name, repo.root, argv)`
-trong `src/jobs.ts` va tra ve `job_id`. Job phai chay **trong `withLock`** — bo lock chi vi doi sang
+trong `src/jobs.ts` va tra ve `job_id`. Job phai chay **trong `withLock`** va hold exclusive lease — bo lock chi vi doi sang
 bat dong bo la mo lai dung cai race ma mutex sinh ra de chan.
 
 ## Ho tro mot toolchain moi
@@ -88,6 +98,7 @@ tin cay: neu doan sai thi tot hon la tra `undefined` de `run_build` bao loi ro r
 ```bash
 npm run typecheck
 npm run smoke
+npx tsx scripts/benchmark-tools.ts
 ```
 
 CI chay dung hai lenh nay tren main va moi PR. Luu y `scripts/` khong nam trong `rootDir` cua
@@ -100,7 +111,7 @@ cha khong truyen sang lenh do tool goi.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **local-repo-mcp** (581 symbols, 1391 relationships, 47 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **local-repo-mcp** (583 symbols, 1398 relationships, 48 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

@@ -80,6 +80,8 @@ const WIN_ENV_PASSTHROUGH = [
 	"PROCESSOR_ARCHITECTURE",
 ]
 
+const SECRET_KEY_PATTERN = /(TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION|COOKIE|CREDENTIAL|AUTH)/i
+
 function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
 		PATH: process.env.PATH,
@@ -98,7 +100,26 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 		}
 		if (!env.HOME && env.USERPROFILE) env.HOME = env.USERPROFILE
 	}
+
+	// Always strip server MCP_TOKEN from spawned child environments
+	delete env.MCP_TOKEN
+
 	return env
+}
+
+export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecrets = false): Record<string, string> {
+	const base = childEnv(extraEnv)
+	const out: Record<string, string> = {}
+
+	for (const [k, v] of Object.entries(base)) {
+		if (v === undefined) continue
+		if (!inheritSecrets && SECRET_KEY_PATTERN.test(k)) {
+			continue
+		}
+		out[k] = v
+	}
+	delete out.MCP_TOKEN
+	return out
 }
 
 /**

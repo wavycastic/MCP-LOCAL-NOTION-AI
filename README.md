@@ -9,15 +9,13 @@ Dung ca hai, moi cai mot viec:
 
 | gitnexus | local-repo-mcp (repo nay) |
 | --- | --- |
-| Hieu code: ai goi ai, sua day thi vo dau | Doc file, sua file, build, test, commit |
+| Hieu code: ai goi ai, sua day thi vo dau | Doc file, sua file, build, test, commit, batch discovery |
 | Tra loi tu graph da index | Lam viec tren file that ngay luc nay |
-| Chi doc | Co quyen ghi, co deny-list, co branch guard |
+| Chi doc | Co quyen ghi, atomic writes, stale guard, deny-list, branch guard |
 
-Dung gitnexus khi hoi ve symbol. Dung `ripgrep` o day khi tim chuoi van ban thuong
-(YAML, .csproj, log, config) — nhung thu khong nam trong graph.
+Dung gitnexus khi hoi ve symbol. Dung `ripgrep` hoac `glob_files` o day khi tim chuoi van ban/files (YAML, .csproj, log, config) — nhung thu khong nam trong graph.
 
-Sau moi `git_commit`, server tu chay lai index cua gitnexus o background. Neu khong
-lam vay, graph se cu hon code va agent tra loi sai ma van rat tu tin.
+Sau moi `git_commit`, server tu chay lai index cua gitnexus o background. Neu khong lam vay, graph se cu hon code va agent tra loi sai ma van rat tu tin.
 
 ## Cai dat
 
@@ -79,16 +77,20 @@ o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
 Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 `repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
 
-## 26 tool
+## 28 tool
 
 | Tool | Viec |
 | --- | --- |
 | `list_repos` | Liet ke repo, quyen ghi, toolchain |
-| `read_file` | Doc file theo dong. Chan binary va file > `MAX_READ_BYTES` |
-| `list_dir` | Liet ke thu muc. Bo qua `.git`, `node_modules`, `bin`, `obj`… va thu bi `.gitignore` loai |
+| `read_file` | Doc file theo dong. Strict UTF-8, BOM/EOL detection, anti-binary |
+| `read_many_files` | Doc batch nhieu file (1-50 files) trong 1 MCP call, giam round-trips |
+| `list_dir` | Liet ke thu muc. Bo qua `.git`, `node_modules`, `bin`, `obj`… |
+| `glob_files` | Tim file theo glob pattern (`**/*.ts`). Engine ripgrep / git-ls-files fallback |
 | `ripgrep` | Tim chuoi/regex. `all_repos: true` de tim xuyen repo |
 | `create_file` | Chi tao file moi, khong ghi de |
-| `edit_file` | Thay doan text (`old_str` khop chinh xac; CRLF/LF tu khop) |
+| `edit_file` | Thay text theo offset mapping (exact -> EOL norm -> trailing WS norm). Nhan `expected_sha256` |
+| `multi_edit_file` | Thay nhieu vi tri nguyen tu (all-or-nothing), offset mapping & atomic temp write |
+| `apply_patch` | Ap dung unified patch (Add, Update, Move, Delete), dry-run & best-effort rollback |
 | `move_file` | `git mv`, giu blame |
 | `remove_file` | `git rm`, chi file da track |
 | `git_restore` | Duong lui: tra TUNG file ve HEAD. Khong nhan `.` hay wildcard |
@@ -100,31 +102,37 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `git_commit` | Commit. Mac dinh CHI file cac tool nay da sua |
 | `git_push` | Mac dinh bi tat (`ALLOW_PUSH`) |
 | `gh_pr` | Quan ly GitHub Pull Request qua GitHub CLI (`gh pr status`, `create`, `list`, `view`) |
-| `terminal` | Chay lenh shell tuy y (`ALLOW_TERMINAL`, mac dinh hien tai `true`) |
+| `terminal` | Chay lenh shell (env sanitized, non-login shell, openWorld annotated, job lease lock) |
 | `reindex` | Chay lai index code graph thu cong |
 
-## Rao an toan
+## Rao an toan & Terminal Hardening
 
 - **Token**: moi request tru `/health` phai co bearer token dung (so sanh timing-safe).
-- **Che do gioi han repo** (`ALLOW_FULL_ACCESS=false`): path phai nam trong repo,
-  khong thoat root qua `..`/symlink va khong doc cheo repo.
-- **Deny-list ca 2 chieu trong che do gioi han repo**: `.env*`, `.git/config`,
-  `.git/credentials`, `*.pem|key|pfx`, `secrets/`, `id_rsa*`, `.npmrc` — khong
-  doc duoc va cung khong commit duoc.
-- **Full Access** (`ALLOW_FULL_ACCESS=true`): chu dong bo qua chroot va deny-list
-  duong dan cho repo `system`. Chi bat khi chap nhan cho agent truy cap toan may.
-- **Terminal**: `ALLOW_TERMINAL=true` cho phep chay lenh shell tuy y; lenh co the
-  doc secret, truy cap mang, sua hoac xoa du lieu. Tat bien nay neu khong can.
-- **Branch guard**: repo thong thuong chi ghi khi branch khop `branchPrefix`
-  (mac dinh `agent/`). Dat `"*"` neu muon cho ghi ca tren `main`.
-- **Repo thong thuong chi duoc ghi khi co `write: true`** trong `repos.json`;
-  quy tac nay khong gioi han repo `system` cua Full Access.
-- **`git_commit` chi stage file agent da sua** — khong keo theo viec ban dang lam do.
-  Muon gom het thi phai noi ro `all: true`.
-- **Mutex theo repo**: cac tool co side effect tren cung repo chay tuan tu. Cho qua
-  `LOCK_WAIT_MS` (120s) thi bao loi ro thay vi treo im lang.
-- **Tat server thi giet luon job dang chay**, khong de lai tien trinh build mo coi.
-- **`audit.log`**: ghi moi tool call, da xoa noi dung file va cac truong dai. Tu rotate o 5MB.
+- **Text I/O & Atomic Writes**: Moi doc/ghi qua strict UTF-8 decoding (`fatal: true`), validate byte NUL, va ghi qua atomic temp files với EOL/BOM/mode preservation. Anti-oracle hash checks (`expected_sha256`).
+- **Terminal Execution Hardening**:
+  - `TERMINAL_MODE` (`disabled` | `repo` | `full`).
+  - Sanitize environment variables: tu dong loai bo cac secret key (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `CREDENTIAL`) va `MCP_TOKEN` khoi child process.
+  - Non-login shell defaults (`sh -c` thay vì `sh -lc`) tranh load secret profile.
+  - Mark tool annotations `{ destructive: true, openWorld: true }`.
+  - Process-tree termination qua `killTree` (Windows `taskkill /T`).
+- **Repo Lease Locks**: Jobs background giu repo lock lease cho toi khi hoan tat; cancelJob giai phong lease an toan.
+- **`audit.log`**: redact noi dung file, patch text, command strings, va `env` object keys.
+
+## Benchmark Metrics
+
+Chay suite benchmark qua:
+```bash
+npx tsx scripts/benchmark-tools.ts
+```
+
+| Benchmark Case | Median (ms) | P95 (ms) | Round Trips | Success Rate |
+| :--- | :---: | :---: | :---: | :---: |
+| Single edit (`edit_file`) | ~23ms | ~25ms | 1 | 100% |
+| 10 edits (10 × `edit_file`) | ~225ms | ~229ms | 10 | 100% |
+| 10 edits (1 × `multi_edit_file`) | ~22ms | ~24ms | 1 | 100% |
+| 10 file patch (1 × `apply_patch`) | ~43ms | ~45ms | 1 | 100% |
+| Read 10 files (1 × `read_many_files`) | ~6ms | ~7ms | 1 | 100% |
+| Glob files (`glob_files`) | ~16ms | ~18ms | 1 | 100% |
 
 ## Env
 
@@ -141,6 +149,9 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `ALLOW_PUSH` | `false` |
 | `GIT_REMOTE` | `origin` |
 | `ALLOW_TERMINAL` | `true` |
+| `TERMINAL_MODE` | `full` |
+| `TERMINAL_MAX_COMMAND_CHARS` | `20000` |
+| `TERMINAL_INHERIT_SECRETS` | `false` |
 | `MAX_READ_BYTES` | `2000000` |
 | `MAX_WRITE_BYTES` | `1000000` |
 | `LOCK_WAIT_MS` | `120000` |
@@ -148,21 +159,10 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `EXEC_TIMEOUT_MS` | `900000` |
 | `DEFAULT_REINDEX_CMD` | `npx gitnexus analyze` |
 
-`DEFAULT_BRANCH_PREFIX` chi ap dung khi `repos.json` khong khai bao `branchPrefix`
-(o tung repo hoac trong `defaults`) — file cau hinh thang hon env.
-
 ## Phat trien
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm run smoke       # tao 2 repo git tam, chay het cac tool
+npm run smoke       # tao repo git tam, chay test suite
+npx tsx scripts/benchmark-tools.ts
 ```
-
-`npm run smoke` khong can repo that va khong cham repo cua ban. CI chay ca hai.
-
-## Viec con lai
-
-- Chua co test cho tang HTTP (bearer auth, `/mcp`) va cho `git_push` that.
-- Smoke chua co case: file CRLF, `new_str` chua `$&`, commit khi khong co gi thay doi.
-- `exec.ts` khong giu `SSH_AUTH_SOCK` → push qua SSH se fail; dung HTTPS + credential helper.
-- `scripts/tunnel.sh` dung named tunnel khi co `config.yml`; neu khong co thi lui ve Quick Tunnel va URL se doi sau moi lan restart. Nen dung named tunnel + Cloudflare Access cho moi truong on dinh.

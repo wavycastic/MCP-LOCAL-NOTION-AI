@@ -1,17 +1,8 @@
-import { createHash } from "node:crypto"
 import { MAX_WRITE_BYTES } from "../config.js"
+import { applyReplacements, findTextMatches } from "../files/matcher.js"
+import { formatTextForWrite } from "../files/atomicWrite.js"
+import { hashBuffer } from "../files/text.js"
 import type { FileOperation, FileSnapshot, PatchPlan, PlannedChange } from "./types.js"
-
-const toLf = (s: string) => s.replace(/\r\n/g, "\n")
-const toCrlf = (s: string) => toLf(s).replace(/\n/g, "\r\n")
-
-function replaceFirst(parts: string[], oldStr: string, newStr: string): string {
-	return parts[0] + newStr + parts.slice(1).join(oldStr)
-}
-
-function hasBom(s: string): boolean {
-	return s.charCodeAt(0) === 0xfeff
-}
 
 export function buildPlan(operations: FileOperation[], snapshots: Map<string, FileSnapshot>): PatchPlan {
 	const changes: PlannedChange[] = []
@@ -20,19 +11,20 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 
 	for (const op of operations) {
 		if (op.kind === "add") {
-			const newContent = op.lines.join("\n") + (op.lines.length > 0 ? "\n" : "")
-			const bytesAfter = Buffer.byteLength(newContent, "utf8")
+			const rawNewContent = op.lines.join("\n") + (op.lines.length > 0 ? "\n" : "")
+			const formattedContent = formatTextForWrite(rawNewContent, false, "lf")
+			const bytesAfter = Buffer.byteLength(formattedContent, "utf8")
 			if (bytesAfter > MAX_WRITE_BYTES) {
 				throw new Error(
 					`Add File '${op.path}' vuot MAX_WRITE_BYTES=${MAX_WRITE_BYTES} (nang ${bytesAfter} bytes)`,
 				)
 			}
-			const sha256After = createHash("sha256").update(newContent).digest("hex")
+			const sha256After = hashBuffer(Buffer.from(formattedContent, "utf8"))
 			totalAdditions += op.lines.length
 			changes.push({
 				type: "add",
 				path: op.path,
-				newContent,
+				newContent: formattedContent,
 				bytesAfter,
 				sha256After,
 			})
@@ -46,7 +38,7 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 			}
 			const oldContent = snap.content
 			const bytesBefore = Buffer.byteLength(oldContent, "utf8")
-			const sha256Before = snap.sha256 ?? createHash("sha256").update(oldContent).digest("hex")
+			const sha256Before = snap.sha256 ?? hashBuffer(Buffer.from(oldContent, "utf8"))
 			const oldLines = oldContent.split("\n").length
 			totalDeletions += oldLines
 			changes.push({
@@ -67,8 +59,8 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 
 			const raw = snap.content
 			const crlf = snap.eol === "crlf"
-			const bom = snap.bom ?? hasBom(raw)
-			const cleanRaw = bom ? raw.slice(1) : raw
+			const bom = snap.bom ?? false
+			const cleanRaw = bom && raw.startsWith("\ufeff") ? raw.slice(1) : raw
 
 			let currentSrc = cleanRaw
 			let totalReplacements = 0
@@ -91,43 +83,31 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 					}
 				}
 
-				let oldBlock = oldLines.join("\n")
-				let newBlock = newLines.join("\n")
+				const oldBlock = oldLines.join("\n")
+				const newBlock = newLines.join("\n")
 
-				let src = currentSrc
-				if (!src.includes(oldBlock)) {
-					const lfSrc = toLf(src)
-					const lfOld = toLf(oldBlock)
-					if (lfOld.length > 0 && lfSrc.includes(lfOld)) {
-						src = lfSrc
-						oldBlock = lfOld
-						newBlock = toLf(newBlock)
-					}
-				}
+				const matches = findTextMatches({ source: currentSrc, needle: oldBlock })
+				const n = matches.length
 
-				const parts = src.split(oldBlock)
-				const n = parts.length - 1
+				const headerMsg = hunk.header ? ` (header: @@ ${hunk.header})` : ""
+				const hunkLabel = hunk.header ? hunk.header : hIdx + 1
 
 				if (n === 0) {
-					const headerMsg = hunk.header ? ` (header: @@ ${hunk.header})` : ""
 					throw new Error(
-						`apply_patch verification failed: '${op.path}' hunk #${hunk.header ? hunk.header : hIdx + 1}${headerMsg} khong tim thay trong file`,
+						`apply_patch verification failed: '${op.path}' hunk #${hunkLabel}${headerMsg} khong tim thay trong file`,
 					)
 				}
 				if (n > 1) {
-					const headerMsg = hunk.header ? ` (header: @@ ${hunk.header})` : ""
 					throw new Error(
-						`apply_patch verification failed: '${op.path}' hunk #${hunk.header ? hunk.header : hIdx + 1}${headerMsg} khop ${n} vi tri (ambiguous). Hay them context hoac @@ header doc nhat.`,
+						`apply_patch verification failed: '${op.path}' hunk #${hunkLabel}${headerMsg} khop ${n} vi tri (ambiguous). Hay them context hoac @@ header doc nhat.`,
 					)
 				}
 
-				currentSrc = replaceFirst(parts, oldBlock, newBlock)
+				currentSrc = applyReplacements(currentSrc, [matches[0]], newBlock)
 				totalReplacements += n
 			}
 
-			let finalStr = crlf ? toCrlf(currentSrc) : currentSrc
-			if (bom) finalStr = "\ufeff" + finalStr
-
+			const finalStr = formatTextForWrite(currentSrc, bom, crlf ? "crlf" : "lf")
 			const bytesBefore = Buffer.byteLength(raw, "utf8")
 			const bytesAfter = Buffer.byteLength(finalStr, "utf8")
 			if (bytesAfter > MAX_WRITE_BYTES) {
@@ -136,8 +116,8 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 				)
 			}
 
-			const sha256Before = snap.sha256 ?? createHash("sha256").update(raw).digest("hex")
-			const sha256After = createHash("sha256").update(finalStr).digest("hex")
+			const sha256Before = snap.sha256 ?? hashBuffer(Buffer.from(raw, "utf8"))
+			const sha256After = hashBuffer(Buffer.from(finalStr, "utf8"))
 
 			const hunkDiffLines: string[] = []
 			for (let hIdx = 0; hIdx < op.hunks.length; hIdx++) {

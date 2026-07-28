@@ -125,5 +125,18 @@ export const GIT_REMOTE = process.env.GIT_REMOTE ?? "origin"
  */
 export const ALLOW_TERMINAL = bool("ALLOW_TERMINAL", true)
 
+export type TerminalMode = "disabled" | "repo" | "full"
+const rawTermMode = (process.env.TERMINAL_MODE ?? "").toLowerCase()
+export const TERMINAL_MODE: TerminalMode =
+	rawTermMode === "disabled"
+		? "disabled"
+		: rawTermMode === "repo"
+			? "repo"
+			: "full"
+
+export const TERMINAL_MAX_COMMAND_CHARS = Number(process.env.TERMINAL_MAX_COMMAND_CHARS ?? 20_000)
+export const TERMINAL_MAX_OUTPUT_BYTES = Number(process.env.TERMINAL_MAX_OUTPUT_BYTES ?? 200_000)
+export const TERMINAL_INHERIT_SECRETS = bool("TERMINAL_INHERIT_SECRETS", false)
+
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
 export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")

@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { dirname } from "node:path"
 import { z } from "zod"
-import { assertGitRepo, assertWritableBranch } from "../git.js"
+import { assertWritableBranch } from "../git.js"
 import { run } from "../exec.js"
 import { buildPlan } from "../patch/apply.js"
 import { parsePatch } from "../patch/parser.js"
-import type { FileSnapshot, PatchPlan, PlannedChange } from "../patch/types.js"
+import type { FileSnapshot, PlannedChange } from "../patch/types.js"
+import { readTextSnapshot } from "../files/text.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath, safeResolve, safeResolveNew } from "../security/paths.js"
 import { noteTouched } from "../touched.js"
@@ -33,26 +33,6 @@ export const applyPatchSchema = {
 		)
 		.optional()
 		.describe("Tuong hop chong stale: hash sha256 ky vong cua cac file lien quan truoc khi sua"),
-}
-
-function isValidUtf8(buf: Buffer): boolean {
-	const sample = buf.subarray(0, Math.min(8000, buf.length))
-	for (let i = 0; i < sample.length; i++) {
-		if (sample[i] === 0) return false
-	}
-	try {
-		new TextDecoder("utf-8", { fatal: true }).decode(buf)
-		return true
-	} catch {
-		return false
-	}
-}
-
-function isCrlf(raw: string): boolean {
-	const crlf = (raw.match(/\r\n/g) ?? []).length
-	if (crlf === 0) return false
-	const lfTotal = (raw.match(/\n/g) ?? []).length
-	return crlf >= lfTotal - crlf
 }
 
 function generateDiff(changes: PlannedChange[]): string {
@@ -167,13 +147,12 @@ export async function applyPatch(a: {
 			if (st.isDirectory()) {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
-			const buf = readFileSync(abs)
-			if (!isValidUtf8(buf)) {
+			try {
+				const snap = readTextSnapshot(abs)
+				snapshots.set(op.path, { path: op.path, existed: true, content: snap.text, sha256: snap.sha256 })
+			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
-			const sha256 = createHash("sha256").update(buf).digest("hex")
-			const raw = buf.toString("utf8")
-			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256 })
 		} else if (op.kind === "update") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
 			const srcAbs = safeResolve(repo.root, op.path)
@@ -190,14 +169,19 @@ export async function applyPatch(a: {
 				}
 			}
 
-			const buf = readFileSync(srcAbs)
-			if (!isValidUtf8(buf)) {
+			try {
+				const snap = readTextSnapshot(srcAbs)
+				snapshots.set(op.path, {
+					path: op.path,
+					existed: true,
+					content: snap.text,
+					sha256: snap.sha256,
+					eol: snap.eol,
+					bom: snap.bom,
+				})
+			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
-			const sha256 = createHash("sha256").update(buf).digest("hex")
-			const raw = buf.toString("utf8")
-			const eol = isCrlf(raw) ? "crlf" : "lf"
-			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256, eol })
 		}
 	}
 
@@ -208,13 +192,14 @@ export async function applyPatch(a: {
 				throw new Error(`Path nam trong deny-list: '${ef.path}'`)
 			}
 			const abs = safeResolve(repo.root, ef.path)
-			const buf = readFileSync(abs)
-			if (!isValidUtf8(buf)) {
+			try {
+				const snap = readTextSnapshot(abs)
+				if (snap.sha256 !== ef.sha256) {
+					throw new Error(`expected_files sha256 mismatch cho '${ef.path}'`)
+				}
+			} catch (err: any) {
+				if (err.message?.includes("expected_files sha256 mismatch")) throw err
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${ef.path}`)
-			}
-			const actualHash = createHash("sha256").update(buf).digest("hex")
-			if (actualHash !== ef.sha256) {
-				throw new Error(`expected_files sha256 mismatch cho '${ef.path}'`)
 			}
 		}
 	}

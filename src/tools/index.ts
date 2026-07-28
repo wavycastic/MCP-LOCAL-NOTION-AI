@@ -22,6 +22,8 @@ import { killJob, killJobSchema } from "./killJob.js"
 import { listDir, listDirSchema } from "./listDir.js"
 import { listRepos } from "./listRepos.js"
 import { moveFile, moveFileSchema } from "./moveFile.js"
+import { readManyFiles, readManyFilesSchema } from "./readManyFiles.js"
+import { globFiles, globFilesSchema } from "./globFiles.js"
 import { readFile, readFileSchema } from "./readFile.js"
 import { reindex, reindexSchema } from "./reindex.js"
 import { removeFile, removeFileSchema } from "./removeFile.js"
@@ -38,6 +40,8 @@ type Opts = {
 	readOnly?: boolean
 	/** Tool xoa du lieu: annotation destructiveHint. */
 	destructive?: boolean
+	/** Tool chay execution ngoai world: annotation openWorldHint. */
+	openWorld?: boolean
 }
 
 /**
@@ -72,7 +76,7 @@ function reg(
 				readOnlyHint: readOnly,
 				destructiveHint: opts.destructive ?? false,
 				idempotentHint: false,
-				openWorldHint: false,
+				openWorldHint: opts.openWorld ?? false,
 			},
 		},
 		async (args: any) => {
@@ -82,7 +86,7 @@ function reg(
 				const out = readOnly ? await exec() : await withLock(lockKey(args), name, exec)
 				audit(name, args, true)
 				return {
-					content: [{ type: "text" as const, text: JSON.stringify(out, null, 2) }],
+					content: [{ type: "text" as const, text: JSON.stringify(out) }],
 				}
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
@@ -103,7 +107,9 @@ export function registerAll(s: McpServer) {
 
 	// —— Doc ——
 	reg(s, "read_file", "Doc file trong mot repo, phan trang theo dong. Dung cho moi file khong nam trong code graph (markup, project file, CI yaml, config). Tu choi file binary va file qua lon.", readFileSchema, readFile, { readOnly: true })
+	reg(s, "read_many_files", "Doc NHIEU FILE trong mot repo trong 1 lan goi duy nhat (1-50 files). Giup giam round-trip khi can doc nhieu file truoc khi refactor.", readManyFilesSchema, readManyFiles, { readOnly: true })
 	reg(s, "list_dir", "Liet ke file/thu muc trong repo. Bo qua .git, node_modules, bin, obj, dist, target, .venv.", listDirSchema, listDir, { readOnly: true })
+	reg(s, "glob_files", "Tim kiem file theo glob patterns (vd: **/*.ts). Tu dong su dung ripgrep hoac git ls-files. Uu tien dung tool nay de tim file theo pattern thay vi list_dir de quy.", globFilesSchema, globFiles, { readOnly: true })
 	reg(s, "ripgrep", "Tim CHUOI VAN BAN tho bang regex trong mot repo, hoac trong TAT CA repo voi all_repos=true. Dung cho thu khong nam trong code graph: yaml, project file, config, chuoi log. Cau hoi ve symbol (ai goi ai, sua day thi vo dau) thi hoi code graph, dung tool nay se sot. Tu lui ve git grep neu may chua cai ripgrep.", ripgrepSchema, ripgrep, { readOnly: true })
 
 	// —— Sua file (chi repo co write: true) ——
@@ -133,7 +139,7 @@ export function registerAll(s: McpServer) {
 	reg(s, "git_commit", "Commit trong mot repo. Mac dinh CHI stage nhung file ma cac tool nay da sua, khong dung den thay doi nguoi dung tu lam do trong cung repo — dat all=true neu that su muon gom het. Tu choi commit neu co file thuoc deny-list (.env, key, secrets/) dang cho. Commit xong tu chay lai index code graph o background va tra ve reindex_job. Chi tren repo co quyen ghi va branch dung prefix.", gitCommitSchema, gitCommit)
 	reg(s, "git_push", "Push branch hien tai len remote (--set-upstream, khong bao gio --force). Yeu cau working tree sach va ALLOW_PUSH=true.", gitPushSchema, gitPush)
 	reg(s, "gh_pr", "Quan ly GitHub Pull Request qua GitHub CLI (`gh pr status`, `gh pr list`, `gh pr view`, `gh pr create`).", ghPrSchema, ghPr)
-	reg(s, "terminal", "Chay lenh terminal theo chuoi command qua shell cua OS. CHI DUNG KHI ban that su muon agent co quyen chay lenh bat ky tren may nay. Mac dinh tool bi tat bang ALLOW_TERMINAL=false. Dung list_repos de chon repo lam cwd. Can vo cung can than: lenh co the doc secret, xoa file, hay thay doi he thong.", terminalSchema, terminal)
+	reg(s, "terminal", "Chay lenh terminal theo chuoi command qua shell cua OS. CHI DUNG KHI ban that su muon agent co quyen chay lenh bat ky tren may nay. Mac dinh tool bi tat bang ALLOW_TERMINAL=false. Dung list_repos de chon repo lam cwd. Can vo cung can than: lenh co the doc secret, xoa file, hay thay doi he thong.", terminalSchema, terminal, { destructive: true, openWorld: true })
 
 	// —— Code graph ——
 	reg(s, "reindex", "Chay lai lenh index code graph cua repo (mac dinh: npx gitnexus analyze). git_commit da tu goi viec nay, nen chi can dung tay khi sua file ma CHUA commit va muon query graph ngay.", reindexSchema, reindex)

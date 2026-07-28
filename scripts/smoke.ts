@@ -80,6 +80,8 @@ const { allRepos, invalidateRepoCache } = await import("../src/repos.js")
 const { redactForAudit } = await import("../src/log.js")
 const { listRepos } = await import("../src/tools/listRepos.js")
 const { readFile } = await import("../src/tools/readFile.js")
+const { readManyFiles } = await import("../src/tools/readManyFiles.js")
+const { globFiles } = await import("../src/tools/globFiles.js")
 const { listDir } = await import("../src/tools/listDir.js")
 const { ripgrep } = await import("../src/tools/ripgrep.js")
 const { createFile } = await import("../src/tools/createFile.js")
@@ -145,6 +147,11 @@ ok("read_file tra noi dung", r1.text.includes("hello"), r1.text)
 const d1 = await listDir({ repo: "demo" })
 ok("list_dir thay README.md", d1.entries.some((e) => e.name === "README.md"))
 ok("list_dir doc duoc ca repo chi doc", (await listDir({ repo: "refonly" })).entries.length > 0)
+const rmRes = await readManyFiles({ repo: "demo", files: [{ path: "README.md" }, { path: "package.json" }] })
+ok("read_many_files doc nhieu file thanh cong", rmRes.files.length === 2 && rmRes.files.every((f) => f.ok), JSON.stringify(rmRes))
+
+const gfRes = await globFiles({ repo: "demo", patterns: ["*.json", "*.md"] })
+ok("glob_files tim kiem theo pattern", gfRes.paths.includes("README.md") && gfRes.paths.includes("package.json"), JSON.stringify(gfRes))
 await denies(
 	"read_file chan file binary",
 	() => readFile({ repo: "refonly", path: "blob.bin" }),
