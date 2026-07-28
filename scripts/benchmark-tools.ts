@@ -219,9 +219,18 @@ results.push(
 	}),
 )
 
-// Case 5B: Glob files
+// Case 5B: Glob files, cold path (no result cache)
 results.push(
-	await runBench("Case 5B: Glob files (glob_files)", 20, 1, async () => {
+	await runBench("Case 5B: Glob files cold (glob_files)", 20, 1, async () => {
+		const res = await globFiles({ repo: "bench", patterns: ["src/**/*.ts"], use_cache: false })
+		return JSON.stringify(res).length
+	}),
+)
+
+// Case 5C: Glob files, warm cache path
+results.push(
+	await runBench("Case 5C: Glob files warm cache", 20, 1, async () => {
+		await globFiles({ repo: "bench", patterns: ["src/**/*.ts"] })
 		const res = await globFiles({ repo: "bench", patterns: ["src/**/*.ts"] })
 		return JSON.stringify(res).length
 	}),

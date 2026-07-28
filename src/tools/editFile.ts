@@ -45,7 +45,11 @@ export async function editFile(a: {
 		}
 	}
 
-	const matches = findTextMatches({ source: snap.text, needle: a.old_str })
+	const matches = findTextMatches({
+		source: snap.text,
+		needle: a.old_str,
+		maxMatches: a.replace_all ? undefined : 2,
+	})
 	const n = matches.length
 
 	if (n === 0) {

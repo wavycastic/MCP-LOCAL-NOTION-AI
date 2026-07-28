@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { mkdir, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { z } from "zod"
 import { assertWritableBranch } from "../git.js"
@@ -6,7 +7,8 @@ import { run } from "../exec.js"
 import { buildPlan } from "../patch/apply.js"
 import { parsePatch } from "../patch/parser.js"
 import type { FileSnapshot, PlannedChange } from "../patch/types.js"
-import { readTextSnapshot } from "../files/text.js"
+import { mapLimit } from "../files/concurrency.js"
+import { readTextSnapshot, readTextSnapshotAsync } from "../files/text.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath, safeResolve, safeResolveNew } from "../security/paths.js"
 import { noteTouched } from "../touched.js"
@@ -20,6 +22,10 @@ export const applyPatchSchema = {
 		.boolean()
 		.optional()
 		.describe("Mac dinh false. Neu true, chi validate va tinh toán summary/diff, khong ghi len o dia"),
+	response_detail: z
+		.enum(["summary", "diff", "full"])
+		.optional()
+		.describe("Muc chi tiet response. Mac dinh: diff cho dry_run, summary khi ghi that"),
 	expected_head_sha: z
 		.string()
 		.optional()
@@ -69,10 +75,12 @@ export async function applyPatch(a: {
 	repo?: string
 	patch_text: string
 	dry_run?: boolean
+	response_detail?: "summary" | "diff" | "full"
 	expected_head_sha?: string
 	expected_files?: Array<{ path: string; sha256: string }>
 	__test_fail_commit?: boolean
 	__test_fail_after_step?: number
+	__test_fail_temp_index?: number
 }) {
 	// Phase A: Parse
 	const parsed = parsePatch(a.patch_text)
@@ -129,17 +137,16 @@ export async function applyPatch(a: {
 		}
 	}
 
-	// Phase C: Snapshot Collection & Validation
+	// Phase C: collect independent snapshots with bounded concurrency.
 	const snapshots = new Map<string, FileSnapshot>()
-
-	for (const op of parsed.operations) {
+	const collectedSnapshots = await mapLimit(parsed.operations, 8, async (op) => {
 		if (op.kind === "add") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
 			const abs = safeResolveNew(repo.root, op.path)
 			if (existsSync(abs)) {
 				throw new Error(`apply_patch verification failed: Add File target da ton tai: '${op.path}'`)
 			}
-			snapshots.set(op.path, { path: op.path, existed: false })
+			return [op.path, { path: op.path, existed: false } satisfies FileSnapshot] as const
 		} else if (op.kind === "delete") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
 			const abs = safeResolve(repo.root, op.path)
@@ -148,15 +155,15 @@ export async function applyPatch(a: {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
 			try {
-				const snap = readTextSnapshot(abs)
-				snapshots.set(op.path, {
+				const snap = await readTextSnapshotAsync(abs)
+				return [op.path, {
 					path: op.path,
 					existed: true,
 					content: snap.text,
 					sha256: snap.sha256,
 					mode: snap.mode,
 					buffer: snap.buffer,
-				})
+				} satisfies FileSnapshot] as const
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
@@ -177,8 +184,8 @@ export async function applyPatch(a: {
 			}
 
 			try {
-				const snap = readTextSnapshot(srcAbs)
-				snapshots.set(op.path, {
+				const snap = await readTextSnapshotAsync(srcAbs)
+				return [op.path, {
 					path: op.path,
 					existed: true,
 					content: snap.text,
@@ -187,12 +194,14 @@ export async function applyPatch(a: {
 					bom: snap.bom,
 					mode: snap.mode,
 					buffer: snap.buffer,
-				})
+				} satisfies FileSnapshot] as const
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
 		}
-	}
+		throw new Error("apply_patch verification failed: unsupported operation")
+	})
+	for (const [path, snapshot] of collectedSnapshots) snapshots.set(path, snapshot)
 
 	// Validate expected_files hashes if provided (with deny-list check and no hash oracle leak)
 	if (a.expected_files) {
@@ -216,8 +225,10 @@ export async function applyPatch(a: {
 	// Phase D: Build Plan in RAM
 	const plan = buildPlan(parsed.operations, snapshots)
 
-	// Phase E: Dry Run
-	const fullDiff = generateDiff(plan.changes)
+	// Phase E: Build only the response detail requested. Avoid generating large
+	// diffs for normal writes; dry-run keeps diff output by default.
+	const responseDetail = a.response_detail ?? (a.dry_run ? "diff" : "summary")
+	const fullDiff = responseDetail === "summary" ? "" : generateDiff(plan.changes)
 	const diffTruncated = fullDiff.length > 50_000
 	const diffSummary = diffTruncated ? fullDiff.slice(0, 50_000) + "\n... [diff truncated]" : fullDiff
 
@@ -229,19 +240,21 @@ export async function applyPatch(a: {
 			files_changed: plan.changes.length,
 			additions: plan.totalAdditions,
 			deletions: plan.totalDeletions,
+			response_detail: responseDetail,
 			changes: plan.changes.map((c) => ({
 				operation: c.type,
 				path: c.type === "move" ? c.to : c.path,
 				from: c.type === "move" ? c.from : undefined,
 				to: c.type === "move" ? c.to : undefined,
-				bytes_before: c.type === "add" ? 0 : c.bytesBefore,
-				bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
-				sha256_before: c.type === "add" ? undefined : c.sha256Before,
-				sha256_after: c.type === "delete" ? undefined : c.sha256After,
+				...(responseDetail === "full" ? {
+					bytes_before: c.type === "add" ? 0 : c.bytesBefore,
+					bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
+					sha256_before: c.type === "add" ? undefined : c.sha256Before,
+					sha256_after: c.type === "delete" ? undefined : c.sha256After,
+				} : {}),
 				replacements: "replacements" in c ? c.replacements : undefined,
 			})),
-			diff: diffSummary,
-			diff_truncated: diffTruncated,
+			...(responseDetail === "summary" ? {} : { diff: diffSummary, diff_truncated: diffTruncated }),
 		}
 	}
 
@@ -250,42 +263,55 @@ export async function applyPatch(a: {
 	const touchedPaths: string[] = []
 
 	try {
-		let writtenCount = 0
 		let renamedCount = 0
 		let unlinkedCount = 0
 
-		// Step 1: Write all new/updated contents to temporary files with permission mode preservation
-		for (const change of plan.changes) {
-			if (change.type === "add") {
-				const abs = safeResolveNew(repo.root, change.path)
-				mkdirSync(dirname(abs), { recursive: true })
-				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, { flag: "wx" })
-				writtenTemps.push({ tmpPath, targetAbs: abs })
-				touchedPaths.push(change.path)
-			} else if (change.type === "update") {
-				const abs = safeResolve(repo.root, change.path)
-				const snap = snapshots.get(change.path)
-				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, { flag: "wx", mode: snap?.mode })
-				writtenTemps.push({ tmpPath, targetAbs: abs })
-				touchedPaths.push(change.path)
-			} else if (change.type === "move") {
-				const destAbs = safeResolveNew(repo.root, change.to)
-				mkdirSync(dirname(destAbs), { recursive: true })
-				const snap = snapshots.get(change.from)
-				const tmpPath = `${destAbs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, { flag: "wx", mode: snap?.mode })
-				writtenTemps.push({ tmpPath, targetAbs: destAbs })
-				touchedPaths.push(change.from)
-				touchedPaths.push(change.to)
-			} else if (change.type === "delete") {
-				touchedPaths.push(change.path)
+		// Step 1: prepare temp files concurrently, but keep rename/unlink commit
+		// steps ordered so rollback semantics remain deterministic.
+		const preparedTemps = await mapLimit(plan.changes, 8, async (change, changeIndex) => {
+			try {
+				if (a.__test_fail_temp_index === changeIndex) {
+					throw new Error(`Fault injection test error for temp index ${changeIndex}`)
+				}
+				if (change.type === "delete") {
+					return { ok: true as const, touched: [change.path] }
+				}
+				const targetAbs = change.type === "move"
+					? safeResolveNew(repo.root, change.to)
+					: change.type === "add"
+						? safeResolveNew(repo.root, change.path)
+						: safeResolve(repo.root, change.path)
+				await mkdir(dirname(targetAbs), { recursive: true })
+				const tmpPath = `${targetAbs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+				const mode = change.type === "update"
+					? snapshots.get(change.path)?.mode
+					: change.type === "move"
+						? snapshots.get(change.from)?.mode
+						: undefined
+				await writeFile(tmpPath, change.newContent, { flag: "wx", mode })
+				return {
+					ok: true as const,
+					temp: { tmpPath, targetAbs },
+					touched: change.type === "move" ? [change.from, change.to] : [change.path],
+				}
+			} catch (error) {
+				return { ok: false as const, error }
 			}
-			writtenCount++
-			if (a.__test_fail_after_step === 1 && writtenCount >= 1) {
-				throw new Error("Fault injection test error during Step 1 (temp write)")
+		})
+		let preparationError: unknown
+		for (const prepared of preparedTemps) {
+			if (prepared.ok) {
+				if (prepared.temp) writtenTemps.push(prepared.temp)
+				touchedPaths.push(...prepared.touched)
+			} else if (preparationError === undefined) {
+				preparationError = prepared.error
 			}
+		}
+		// Record every successful temp before throwing so rollback cannot orphan
+		// files created by workers that completed after a sibling failed.
+		if (preparationError !== undefined) throw preparationError
+		if (a.__test_fail_after_step === 1 && writtenTemps.length > 0) {
+			throw new Error("Fault injection test error during Step 1 (temp write)")
 		}
 
 		// Step 2: Atomic rename temp files into targets
@@ -385,18 +411,20 @@ export async function applyPatch(a: {
 		files_changed: plan.changes.length,
 		additions: plan.totalAdditions,
 		deletions: plan.totalDeletions,
+		response_detail: responseDetail,
 		changes: plan.changes.map((c) => ({
 			operation: c.type,
 			path: c.type === "move" ? c.to : c.path,
 			from: c.type === "move" ? c.from : undefined,
 			to: c.type === "move" ? c.to : undefined,
-			bytes_before: c.type === "add" ? 0 : c.bytesBefore,
-			bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
-			sha256_before: c.type === "add" ? undefined : c.sha256Before,
-			sha256_after: c.type === "delete" ? undefined : c.sha256After,
+			...(responseDetail === "full" ? {
+				bytes_before: c.type === "add" ? 0 : c.bytesBefore,
+				bytes_after: c.type === "delete" ? 0 : c.bytesAfter,
+				sha256_before: c.type === "add" ? undefined : c.sha256Before,
+				sha256_after: c.type === "delete" ? undefined : c.sha256After,
+			} : {}),
 			replacements: "replacements" in c ? c.replacements : undefined,
 		})),
-		diff: diffSummary,
-		diff_truncated: diffTruncated,
+		...(responseDetail === "summary" ? {} : { diff: diffSummary, diff_truncated: diffTruncated }),
 	}
 }
