@@ -508,13 +508,30 @@ await createFile({ repo: "demo", path: "src/rb_upd.ts", content: "export const r
 
 const stepPatch = `*** Begin Patch\n*** Add File: src/rb_add.ts\n+new\n*** Update File: src/rb_upd.ts\n@@\n-export const rbUpd = 1\n+export const rbUpd = 999\n*** Update File: src/rb_move.ts\n*** Move to: src/rb_moved_dest.ts\n@@\n-export const rbMove = true\n+export const rbMove = false\n*** Delete File: src/rb_del.ts\n*** End Patch`
 
+async function assertFullRollbackState(stepName: string) {
+	const delContent = (await readFile({ repo: "demo", path: "src/rb_del.ts" })).text
+	ok(`${stepName} rollback khoi phuc file delete (src/rb_del.ts)`, delContent.includes("rbDel = true"))
+
+	const moveSrcContent = (await readFile({ repo: "demo", path: "src/rb_move.ts" })).text
+	ok(`${stepName} rollback khoi phuc file move source (src/rb_move.ts)`, moveSrcContent.includes("rbMove = true"))
+	
+	const srcEntries = (await listDir({ repo: "demo", path: "src" })).entries
+	ok(`${stepName} rollback xoa move destination (src/rb_moved_dest.ts)`, !srcEntries.some((c) => c.name === "rb_moved_dest.ts"))
+
+	const updContent = (await readFile({ repo: "demo", path: "src/rb_upd.ts" })).text
+	ok(`${stepName} rollback khoi phuc file update (src/rb_upd.ts)`, updContent.includes("rbUpd = 1"))
+
+	ok(`${stepName} rollback xoa file add (src/rb_add.ts)`, !srcEntries.some((c) => c.name === "rb_add.ts"))
+	ok(`${stepName} rollback khong de lai file temp .tmp`, !srcEntries.some((c) => c.name.endsWith(".tmp")))
+}
+
 // Fault during Step 1 (temp write)
 await denies(
 	"apply_patch rollback mid-commit Step 1 (temp write failure)",
 	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 1 }),
 	"Fault injection test error during Step 1",
 )
-ok("Step 1 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_del.ts" })).text.includes("rbDel = true"))
+await assertFullRollbackState("Step 1")
 
 // Fault during Step 2 (mid-rename)
 await denies(
@@ -522,7 +539,7 @@ await denies(
 	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 2 }),
 	"Fault injection test error during Step 2",
 )
-ok("Step 2 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_move.ts" })).text.includes("rbMove = true"))
+await assertFullRollbackState("Step 2")
 
 // Fault during Step 3 (mid-unlink)
 await denies(
@@ -530,7 +547,7 @@ await denies(
 	() => applyPatch({ repo: "demo", patch_text: stepPatch, __test_fail_after_step: 3 }),
 	"Fault injection test error during Step 3",
 )
-ok("Step 3 rollback khoi phuc tro lai nguyen ven", (await readFile({ repo: "demo", path: "src/rb_upd.ts" })).text.includes("rbUpd = 1"))
+await assertFullRollbackState("Step 3")
 
 // Cleanup rollback test files
 await applyPatch({
