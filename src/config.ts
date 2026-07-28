@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 function req(name: string): string {
 	const v = process.env[name]
@@ -53,8 +54,10 @@ export const HOST = process.env.HOST ?? "127.0.0.1"
  */
 export const WORKSPACE_ROOT = optRealpath("WORKSPACE_ROOT")
 
+const appDir = dirname(dirname(fileURLToPath(import.meta.url)))
+
 /** File khai bao repo tuong minh (quyen ghi, build/test cmd). */
-export const REPOS_CONFIG = resolve(process.env.REPOS_CONFIG ?? "repos.json")
+export const REPOS_CONFIG = resolve(appDir, process.env.REPOS_CONFIG ?? "repos.json")
 
 /** Repo tu dong tim thay co duoc ghi khong. Mac dinh khong. */
 export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)

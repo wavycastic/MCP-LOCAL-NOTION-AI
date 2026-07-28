@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { EXEC_TIMEOUT_MS, MAX_OUTPUT } from "./config.js"
+import { FULL_ACCESS_ROOT } from "./security/paths.js"
 
 export type ExecResult = {
 	code: number | null
@@ -137,6 +138,17 @@ export function run(
 	const [rawCmd, ...rawArgs] = argv
 	if (!rawCmd) throw new Error("argv rong")
 
+	const cwd0 =
+		opts.cwd === FULL_ACCESS_ROOT
+			? (process.env.FULL_ACCESS_CWD ?? process.cwd())
+			: opts.cwd
+	if (!existsSync(cwd0)) {
+		throw new Error(
+			`cwd khong ton tai: "${cwd0}" (repo root khong hop le). ` +
+				`Loi spawn ENOENT o day la do cwd, khong phai do thieu "${rawCmd}"`,
+		)
+	}
+
 	const resolved = resolveCmd(rawCmd)
 
 	// Windows chan spawn truc tiep .cmd/.bat khi shell: false (EINVAL), va builtin
@@ -162,7 +174,7 @@ export function run(
 
 	return new Promise((res, rej) => {
 		const p = spawn(cmd, args, {
-			cwd: opts.cwd,
+			cwd: cwd0,
 			shell: false, // BAT BUOC
 			env: childEnv(opts.env),
 		})
