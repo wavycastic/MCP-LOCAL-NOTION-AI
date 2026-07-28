@@ -149,7 +149,14 @@ export async function applyPatch(a: {
 			}
 			try {
 				const snap = readTextSnapshot(abs)
-				snapshots.set(op.path, { path: op.path, existed: true, content: snap.text, sha256: snap.sha256 })
+				snapshots.set(op.path, {
+					path: op.path,
+					existed: true,
+					content: snap.text,
+					sha256: snap.sha256,
+					mode: snap.mode,
+					buffer: snap.buffer,
+				})
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
 			}
@@ -178,6 +185,8 @@ export async function applyPatch(a: {
 					sha256: snap.sha256,
 					eol: snap.eol,
 					bom: snap.bom,
+					mode: snap.mode,
+					buffer: snap.buffer,
 				})
 			} catch (err: any) {
 				throw new Error(`apply_patch does not support non-UTF-8 or binary files: ${op.path}`)
@@ -245,26 +254,28 @@ export async function applyPatch(a: {
 		let renamedCount = 0
 		let unlinkedCount = 0
 
-		// Step 1: Write all new/updated contents to temporary files
+		// Step 1: Write all new/updated contents to temporary files with permission mode preservation
 		for (const change of plan.changes) {
 			if (change.type === "add") {
 				const abs = safeResolveNew(repo.root, change.path)
 				mkdirSync(dirname(abs), { recursive: true })
 				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, "utf8")
+				writeFileSync(tmpPath, change.newContent, { flag: "wx" })
 				writtenTemps.push({ tmpPath, targetAbs: abs })
 				touchedPaths.push(change.path)
 			} else if (change.type === "update") {
 				const abs = safeResolve(repo.root, change.path)
+				const snap = snapshots.get(change.path)
 				const tmpPath = `${abs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, "utf8")
+				writeFileSync(tmpPath, change.newContent, { flag: "wx", mode: snap?.mode })
 				writtenTemps.push({ tmpPath, targetAbs: abs })
 				touchedPaths.push(change.path)
 			} else if (change.type === "move") {
 				const destAbs = safeResolveNew(repo.root, change.to)
 				mkdirSync(dirname(destAbs), { recursive: true })
+				const snap = snapshots.get(change.from)
 				const tmpPath = `${destAbs}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-				writeFileSync(tmpPath, change.newContent, "utf8")
+				writeFileSync(tmpPath, change.newContent, { flag: "wx", mode: snap?.mode })
 				writtenTemps.push({ tmpPath, targetAbs: destAbs })
 				touchedPaths.push(change.from)
 				touchedPaths.push(change.to)
@@ -306,7 +317,7 @@ export async function applyPatch(a: {
 			throw new Error("Fault injection test error during commit phase")
 		}
 	} catch (commitErr: any) {
-		// Rollback best-effort
+		// Rollback best-effort: restore exact raw buffer & permissions
 		let rollbackSuccess = true
 		try {
 			// Remove temporary files
@@ -317,24 +328,39 @@ export async function applyPatch(a: {
 					} catch {}
 				}
 			}
-			// Restore original contents from snapshots
+			// Restore original raw content & mode from snapshots
 			for (const change of plan.changes) {
 				if (change.type === "add") {
 					const abs = safeResolveNew(repo.root, change.path)
 					if (existsSync(abs)) unlinkSync(abs)
 				} else if (change.type === "update") {
 					const abs = safeResolveNew(repo.root, change.path)
-					writeFileSync(abs, change.oldContent, "utf8")
+					const snap = snapshots.get(change.path)
+					if (snap?.buffer) {
+						writeFileSync(abs, snap.buffer, { mode: snap.mode })
+					} else {
+						writeFileSync(abs, change.oldContent, "utf8")
+					}
 				} else if (change.type === "move") {
 					const srcAbs = safeResolveNew(repo.root, change.from)
 					mkdirSync(dirname(srcAbs), { recursive: true })
-					writeFileSync(srcAbs, change.oldContent, "utf8")
+					const snap = snapshots.get(change.from)
+					if (snap?.buffer) {
+						writeFileSync(srcAbs, snap.buffer, { mode: snap.mode })
+					} else {
+						writeFileSync(srcAbs, change.oldContent, "utf8")
+					}
 					const destAbs = safeResolveNew(repo.root, change.to)
 					if (existsSync(destAbs)) unlinkSync(destAbs)
 				} else if (change.type === "delete") {
 					const abs = safeResolveNew(repo.root, change.path)
 					mkdirSync(dirname(abs), { recursive: true })
-					writeFileSync(abs, change.oldContent, "utf8")
+					const snap = snapshots.get(change.path)
+					if (snap?.buffer) {
+						writeFileSync(abs, snap.buffer, { mode: snap.mode })
+					} else {
+						writeFileSync(abs, change.oldContent, "utf8")
+					}
 				}
 			}
 		} catch (rbErr) {

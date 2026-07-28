@@ -25,6 +25,48 @@ const DEFAULT_IGNORE_GLOBS = [
 	"!.venv",
 ]
 
+function globToRegex(glob: string): RegExp {
+	let p = glob.replace(/\\/g, "/")
+	if (!p.startsWith("/") && !p.startsWith("**")) {
+		p = "**/" + p
+	}
+	let regexStr = "^"
+	let i = 0
+	while (i < p.length) {
+		const char = p[i]
+		if (char === "*") {
+			if (p[i + 1] === "*") {
+				if (p[i + 2] === "/") {
+					regexStr += "(?:.*\\/|)"
+					i += 3
+				} else {
+					regexStr += ".*"
+					i += 2
+				}
+			} else {
+				regexStr += "[^/]*"
+				i++
+			}
+		} else if (char === "?") {
+			regexStr += "[^/]"
+			i++
+		} else if ("./+^$()[]{}|\\".includes(char)) {
+			regexStr += "\\" + char
+			i++
+		} else {
+			regexStr += char
+			i++
+		}
+	}
+	regexStr += "$"
+	return new RegExp(regexStr)
+}
+
+function matchesAnyPattern(relPath: string, patterns: string[]): boolean {
+	const norm = relPath.replace(/\\/g, "/")
+	return patterns.some((pat) => globToRegex(pat).test(norm))
+}
+
 function sortPaths(paths: string[]): string[] {
 	return paths.sort((a, b) => {
 		const depthA = a.split("/").length
@@ -41,6 +83,7 @@ export async function globFiles(a: {
 	path?: string
 	include_ignored?: boolean
 	max_results?: number
+	__force_fallback?: boolean
 }) {
 	const repo = resolveRepo(a.repo)
 	const cwd = safeResolveDir(repo.root, a.path)
@@ -49,35 +92,45 @@ export async function globFiles(a: {
 	let engine: "ripgrep" | "git-ls-files" = "ripgrep"
 	let rawPaths: string[] = []
 
-	// Try ripgrep first
-	const rgArgv = ["rg", "--files", "--color=never"]
-	if (!a.include_ignored) {
-		rgArgv.push("--hidden")
-		for (const ig of DEFAULT_IGNORE_GLOBS) {
-			rgArgv.push("-g", ig)
+	if (!a.__force_fallback) {
+		const rgArgv = ["rg", "--files", "--color=never"]
+		if (!a.include_ignored) {
+			rgArgv.push("--hidden")
+			for (const ig of DEFAULT_IGNORE_GLOBS) {
+				rgArgv.push("-g", ig)
+			}
+		} else {
+			rgArgv.push("--no-ignore")
+		}
+
+		for (const p of a.patterns) {
+			rgArgv.push("-g", p)
+		}
+
+		try {
+			const res = await run(rgArgv, { cwd, timeoutMs: 15_000 })
+			if (res.code === 0) {
+				rawPaths = res.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+			} else if (res.code === 1) {
+				// Exit code 1 means 0 matches found — return empty paths list
+				rawPaths = []
+			} else {
+				throw new Error(`rg exit code ${res.code}`)
+			}
+		} catch {
+			engine = "git-ls-files"
 		}
 	} else {
-		rgArgv.push("--no-ignore")
-	}
-
-	for (const p of a.patterns) {
-		rgArgv.push("-g", p)
-	}
-
-	try {
-		const res = await run(rgArgv, { cwd, timeoutMs: 15_000 })
-		if (res.code === 0) {
-			rawPaths = res.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
-		} else {
-			throw new Error("rg failed")
-		}
-	} catch {
-		// Fallback to git ls-files
 		engine = "git-ls-files"
+	}
+
+	if (engine === "git-ls-files") {
 		try {
 			const lsRes = await run(["git", "ls-files"], { cwd, timeoutMs: 15_000 })
 			if (lsRes.code === 0) {
-				rawPaths = lsRes.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+				const allTracked = lsRes.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+				// Filter tracked paths by patterns using glob matching
+				rawPaths = allTracked.filter((p) => matchesAnyPattern(p, a.patterns))
 			}
 		} catch {
 			rawPaths = []

@@ -36,7 +36,7 @@ function finished(repoName: string, job: Job) {
 }
 
 async function runOrQueue(repo: Repo, argv: string[], wantBackground?: boolean) {
-	const job = startJob(repo.name, repo.root, argv)
+	const job = startJob(repo.name, repo.root, repo.root, argv)
 	if (wantBackground) return queued(repo.name, job, false)
 
 	const done = await waitForJob(job.id, SYNC_WAIT_MS)

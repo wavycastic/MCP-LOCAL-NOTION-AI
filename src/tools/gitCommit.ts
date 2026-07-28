@@ -110,7 +110,7 @@ export async function gitCommit(a: {
 	// Code vua doi thi code graph thanh lac hau ngay lap tuc. Neu de agent tu nho
 	// goi reindex thi se co luc no quen, va lan query sau tra ve du lieu cu ma
 	// khong co dau hieu gi. Chay ngay o background.
-	const job = a.reindex === false ? undefined : startJob(repo.name, repo.root, [...repo.reindex])
+	const job = a.reindex === false ? undefined : startJob(repo.name, repo.root, repo.root, [...repo.reindex])
 
 	return {
 		repo: repo.name,

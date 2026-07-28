@@ -63,7 +63,7 @@ function finished(repoName: string, job: Job) {
  *    voi edit_file cua chinh no — dung thu tu ma job (bat dong bo) da lo tranh.
  */
 async function runOrQueue(repo: Repo, argv: string[], wantBackground?: boolean) {
-	const job = startJob(repo.name, repo.root, argv)
+	const job = startJob(repo.name, repo.root, repo.root, argv)
 	if (wantBackground) return queued(repo.name, job, false)
 
 	const done = await waitForJob(job.id, SYNC_WAIT_MS)

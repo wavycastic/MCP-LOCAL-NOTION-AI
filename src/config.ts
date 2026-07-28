@@ -119,24 +119,26 @@ export const ALLOW_PUSH = bool("ALLOW_PUSH", false)
 export const GIT_REMOTE = process.env.GIT_REMOTE ?? "origin"
 
 /**
- * Kill switch cho tool chay terminal lenh tu do. Mac dinh tat vi day la duong
- * nguy hiem nhat: agent co the chay lenh xoa file, doc secret, network call,
- * hay bat ky lenh nao khac ma shell cho phep.
+ * Kill switch cho tool chay terminal lenh tu do. Mac dinh TAT de an toan cho nguoi dung moi.
  */
-export const ALLOW_TERMINAL = bool("ALLOW_TERMINAL", true)
+export const ALLOW_TERMINAL = bool("ALLOW_TERMINAL", false)
 
 export type TerminalMode = "disabled" | "repo" | "full"
 const rawTermMode = (process.env.TERMINAL_MODE ?? "").toLowerCase()
-export const TERMINAL_MODE: TerminalMode =
-	rawTermMode === "disabled"
-		? "disabled"
-		: rawTermMode === "repo"
-			? "repo"
-			: "full"
+export const TERMINAL_MODE: TerminalMode = !ALLOW_TERMINAL || rawTermMode === "disabled"
+	? "disabled"
+	: rawTermMode === "repo"
+		? "repo"
+		: "full"
 
 export const TERMINAL_MAX_COMMAND_CHARS = Number(process.env.TERMINAL_MAX_COMMAND_CHARS ?? 20_000)
 export const TERMINAL_MAX_OUTPUT_BYTES = Number(process.env.TERMINAL_MAX_OUTPUT_BYTES ?? 200_000)
 export const TERMINAL_INHERIT_SECRETS = bool("TERMINAL_INHERIT_SECRETS", false)
+
+export type ToolProfile = "core" | "safe" | "full"
+const rawProfile = (process.env.TOOL_PROFILE ?? "full").toLowerCase()
+export const TOOL_PROFILE: ToolProfile =
+	rawProfile === "core" ? "core" : rawProfile === "safe" ? "safe" : "full"
 
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
 export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")

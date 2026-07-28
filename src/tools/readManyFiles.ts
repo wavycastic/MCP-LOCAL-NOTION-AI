@@ -92,7 +92,7 @@ export async function readManyFiles(a: {
 			const sliceText = lines.slice(start, end).join("\n")
 			const sliceBytes = Buffer.byteLength(sliceText, "utf8")
 
-			if (accumulatedBytes + sliceBytes > maxTotalBytes && results.length > 0) {
+			if (accumulatedBytes + sliceBytes > maxTotalBytes) {
 				truncated = true
 				results.push({
 					path: item.path,

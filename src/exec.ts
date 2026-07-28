@@ -28,37 +28,9 @@ function resolveCmd(cmd: string): string {
 	return cmd
 }
 
-/**
- * Builtin cua cmd.exe, khong ton tai duoi dang file .exe.
- *
- * Co y giu that ngan: moi ten trong day la mot lenh phai di vong qua cmd.exe, ma
- * cmd.exe la thu duy nhat trong ca file nay con dien giai ky tu dac biet. `del`,
- * `copy`, `move`, `rmdir` da bi bo — xoa/chep file la viec cua remove_file/move_file,
- * khong can mo them mot duong nua.
- */
 const WIN_BUILTINS = new Set(["echo", "dir", "type", "cls"])
-
-/**
- * Ky tu ma cmd.exe dien giai TRUOC khi chuong trinh nhin thay tham so.
- *
- * Day la cho nguy hiem nhat cua duong vong qua cmd.exe: Node trich dan tham so
- * theo quy tac cua CommandLineToArgvW, con cmd.exe lai boc lai mot lop rieng.
- * Hai quy tac nay khac nhau, nen mot tham so chua `&` van co the tach thanh lenh
- * thu hai du `shell: false`. Hien tai tham so deu den tu repos.json (tin duoc),
- * nhung chi can mot tool tuong lai truyen text cua nguoi dung vao `npm run` la
- * thanh lo hong. Chan thang tay o day cho khoi quen.
- */
 const CMD_META = /[&|<>^"%\r\n]/
 
-/**
- * Bien moi truong Windows bat buoc phai truyen xuong.
- *
- * Danh sach env truoc day chi co PATH/HOME — dung tren Linux, sai tren Windows:
- * thieu SystemRoot thi winsock khong khoi tao duoc (moi thu cham mang deu chet),
- * thieu USERPROFILE thi git khong tim thay .gitconfig toan cuc, tuc khong co
- * credential helper, tuc `git push` treo hoac fail. Smoke test khong bat duoc
- * loi nay vi no chi commit trong repo tam da co san identity o .git/config.
- */
 const WIN_ENV_PASSTHROUGH = [
 	"SystemRoot",
 	"windir",
@@ -88,7 +60,7 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 		LANG: "C",
 		DOTNET_CLI_TELEMETRY_OPTOUT: "1",
 		DOTNET_NOLOGO: "1",
-		GIT_TERMINAL_PROMPT: "0", // khong treo cho nhap credential
+		GIT_TERMINAL_PROMPT: "0",
 		...(extraEnv ?? {}),
 	}
 	if (process.env.HOME) env.HOME = process.env.HOME
@@ -101,13 +73,26 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 		if (!env.HOME && env.USERPROFILE) env.HOME = env.USERPROFILE
 	}
 
-	// Always strip server MCP_TOKEN from spawned child environments
 	delete env.MCP_TOKEN
-
 	return env
 }
 
 export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecrets = false): Record<string, string> {
+	if (extraEnv) {
+		const keys = Object.keys(extraEnv)
+		if (keys.length > 100) {
+			throw new Error("Too many environment variables (max 100 entries allowed)")
+		}
+		for (const [k, v] of Object.entries(extraEnv)) {
+			if (k.length > 200) {
+				throw new Error(`Environment key '${k.slice(0, 20)}...' exceeds 200 characters limit`)
+			}
+			if (v.length > 4000) {
+				throw new Error(`Environment value for '${k}' exceeds 4000 characters limit`)
+			}
+		}
+	}
+
 	const base = childEnv(extraEnv)
 	const out: Record<string, string> = {}
 
@@ -122,14 +107,6 @@ export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecre
 	return out
 }
 
-/**
- * SIGKILL tren Windows chi giet dung tien trinh duoc spawn. Neu do la cmd.exe thi
- * npm/node/dotnet ben duoi song tiep — timeout coi nhu vo nghia. taskkill /T giet
- * ca cay.
- *
- * Export ra ngoai vi khong chi timeout can den no: luc tat server cung phai giet
- * cac job dang chay, khong thi `dotnet build` thanh tien trinh mo coi.
- */
 export function killTree(p: ChildProcess): void {
 	if (process.platform === "win32" && p.pid) {
 		try {
@@ -139,22 +116,21 @@ export function killTree(p: ChildProcess): void {
 			k.on("error", () => p.kill("SIGKILL"))
 			return
 		} catch {
-			// roi xuong duong duoi
+			// fallthrough
 		}
 	}
 	p.kill("SIGKILL")
 }
 
-/**
- * Chay argv co dinh, khong qua shell, trong cwd la root cua MOT repo.
- * cwd la tham so bat buoc: multi-repo nen khong con "thu muc mac dinh" nao dung.
- *
- * onSpawn: nhan ChildProcess ngay khi tao, de nguoi goi (jobs.ts) con cach giet
- * no giua duong. Khong co no thi tien trinh chay xong moi biet la ai.
- */
 export function run(
 	argv: string[],
-	opts: { cwd: string; timeoutMs?: number; onSpawn?: (p: ChildProcess) => void; env?: Record<string, string> },
+	opts: {
+		cwd: string
+		timeoutMs?: number
+		maxOutputBytes?: number
+		onSpawn?: (p: ChildProcess) => void
+		env?: Record<string, string>
+	},
 ): Promise<ExecResult> {
 	const [rawCmd, ...rawArgs] = argv
 	if (!rawCmd) throw new Error("argv rong")
@@ -172,8 +148,6 @@ export function run(
 
 	const resolved = resolveCmd(rawCmd)
 
-	// Windows chan spawn truc tiep .cmd/.bat khi shell: false (EINVAL), va builtin
-	// thi khong co file de spawn. Ca hai truong hop deu phai di qua cmd.exe.
 	const viaCmd =
 		process.platform === "win32" &&
 		(resolved.endsWith(".cmd") ||
@@ -192,11 +166,12 @@ export function run(
 
 	const cmd = viaCmd ? process.env.ComSpec || "cmd.exe" : resolved
 	const args = viaCmd ? ["/d", "/s", "/c", rawCmd, ...rawArgs] : rawArgs
+	const maxOutput = opts.maxOutputBytes ?? MAX_OUTPUT
 
 	return new Promise((res, rej) => {
 		const p = spawn(cmd, args, {
 			cwd: cwd0,
-			shell: false, // BAT BUOC
+			shell: false,
 			env: childEnv(opts.env),
 		})
 		opts.onSpawn?.(p)
@@ -210,10 +185,10 @@ export function run(
 		}, opts.timeoutMs ?? EXEC_TIMEOUT_MS)
 
 		p.stdout.on("data", (d) => {
-			if (out.length < MAX_OUTPUT) out += d.toString()
+			if (out.length < maxOutput) out += d.toString()
 		})
 		p.stderr.on("data", (d) => {
-			if (err.length < MAX_OUTPUT) err += d.toString()
+			if (err.length < maxOutput) err += d.toString()
 		})
 		p.on("error", (e) => {
 			clearTimeout(t)
@@ -223,8 +198,8 @@ export function run(
 			clearTimeout(t)
 			res({
 				code,
-				stdout: out.slice(0, MAX_OUTPUT),
-				stderr: err.slice(0, MAX_OUTPUT),
+				stdout: out.slice(0, maxOutput),
+				stderr: err.slice(0, maxOutput),
 				timedOut,
 			})
 		})

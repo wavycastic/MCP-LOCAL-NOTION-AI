@@ -57,6 +57,8 @@ function lockKey(args: any): string {
 	}
 }
 
+import { TOOL_PROFILE } from "../config.js"
+
 function reg(
 	s: McpServer,
 	name: string,
@@ -65,6 +67,35 @@ function reg(
 	fn: Handler,
 	opts: Opts = {},
 ) {
+	if (TOOL_PROFILE === "safe" && (opts.destructive || opts.openWorld || name === "git_push")) {
+		return
+	}
+	if (TOOL_PROFILE === "core") {
+		const coreAllowed = new Set([
+			"list_repos",
+			"read_file",
+			"read_many_files",
+			"list_dir",
+			"glob_files",
+			"ripgrep",
+			"edit_file",
+			"multi_edit_file",
+			"create_file",
+			"run_build",
+			"run_tests",
+			"run_lint",
+			"run_typecheck",
+			"job_status",
+			"git_status",
+			"git_diff",
+			"git_log",
+			"git_branch",
+			"git_commit",
+			"reindex",
+		])
+		if (!coreAllowed.has(name)) return
+	}
+
 	const readOnly = opts.readOnly ?? false
 
 	s.registerTool(

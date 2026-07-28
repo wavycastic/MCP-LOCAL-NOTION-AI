@@ -39,6 +39,8 @@ export type FileSnapshot = {
 	sha256?: string
 	eol?: "lf" | "crlf"
 	bom?: boolean
+	mode?: number
+	buffer?: Buffer
 }
 
 export type PlannedChange =

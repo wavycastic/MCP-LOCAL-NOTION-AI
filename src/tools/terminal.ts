@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { ALLOW_TERMINAL, SYNC_WAIT_MS, TERMINAL_INHERIT_SECRETS, TERMINAL_MAX_COMMAND_CHARS, TERMINAL_MODE } from "../config.js"
+import { ALLOW_TERMINAL, SYNC_WAIT_MS, TERMINAL_INHERIT_SECRETS, TERMINAL_MAX_COMMAND_CHARS, TERMINAL_MAX_OUTPUT_BYTES, TERMINAL_MODE } from "../config.js"
 import { buildTerminalEnv } from "../exec.js"
 import { startJob, waitForJob, type Job } from "../jobs.js"
 import { resolveRepo } from "../repos.js"
@@ -39,13 +39,18 @@ function queued(repoName: string, job: Job, waited: boolean) {
 }
 
 function finished(repoName: string, job: Job) {
+	const rawOut = job.output ?? job.error ?? ""
+	const truncated = rawOut.length > TERMINAL_MAX_OUTPUT_BYTES
+	const finalOut = truncated ? rawOut.slice(0, TERMINAL_MAX_OUTPUT_BYTES) + "\n... [output truncated]" : rawOut
+
 	return {
 		repo: repoName,
 		job_id: job.id,
 		command_length: job.command.length,
 		exit_code: job.exit_code ?? null,
 		timed_out: job.timed_out ?? false,
-		output: job.output ?? job.error ?? "",
+		output: finalOut,
+		output_truncated: truncated,
 	}
 }
 
@@ -95,7 +100,7 @@ export async function terminal(a: {
 	const argv = buildShellArgv(a.command, a.shell)
 	const sanitizedEnv = buildTerminalEnv(a.env, TERMINAL_INHERIT_SECRETS)
 
-	const job = startJob(repo.name, cwd, argv, undefined, sanitizedEnv)
+	const job = startJob(repo.name, repo.root, cwd, argv, undefined, sanitizedEnv)
 	if (a.background) return queued(repo.name, job, false)
 
 	const done = await waitForJob(job.id, SYNC_WAIT_MS)

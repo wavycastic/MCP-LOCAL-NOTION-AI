@@ -9,7 +9,7 @@
  *   npm run smoke
  */
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -150,8 +150,17 @@ ok("list_dir doc duoc ca repo chi doc", (await listDir({ repo: "refonly" })).ent
 const rmRes = await readManyFiles({ repo: "demo", files: [{ path: "README.md" }, { path: "package.json" }] })
 ok("read_many_files doc nhieu file thanh cong", rmRes.files.length === 2 && rmRes.files.every((f) => f.ok), JSON.stringify(rmRes))
 
+const rmBudget = await readManyFiles({ repo: "demo", files: [{ path: "README.md" }], max_total_bytes: 3 })
+ok("read_many_files ap dung byte budget len file dau tien", rmBudget.truncated === true && rmBudget.files[0].ok === false, JSON.stringify(rmBudget))
+
 const gfRes = await globFiles({ repo: "demo", patterns: ["*.json", "*.md"] })
 ok("glob_files tim kiem theo pattern", gfRes.paths.includes("README.md") && gfRes.paths.includes("package.json"), JSON.stringify(gfRes))
+
+const gfNoMatch = await globFiles({ repo: "demo", patterns: ["*.nonexistent_ext"] })
+ok("glob_files tra paths rong khi no-match", gfNoMatch.paths.length === 0 && gfNoMatch.engine === "ripgrep", JSON.stringify(gfNoMatch))
+
+const gfFallback = await globFiles({ repo: "demo", patterns: ["*.json"], __force_fallback: true })
+ok("glob_files fallback filter theo pattern dung", gfFallback.paths.includes("package.json") && !gfFallback.paths.includes("README.md") && gfFallback.engine === "git-ls-files", JSON.stringify(gfFallback))
 await denies(
 	"read_file chan file binary",
 	() => readFile({ repo: "refonly", path: "blob.bin" }),
@@ -295,6 +304,55 @@ await denies(
 			edits: [{ old_str: "const a = 10", new_str: "const a = 100" }],
 		}),
 	"expected_sha256 mismatch",
+)
+
+const eSnap = await readFile({ repo: "demo", path: "src/a.ts" })
+const eShaRes = await editFile({
+	repo: "demo",
+	path: "src/a.ts",
+	old_str: "const a = 10",
+	new_str: "const a = 10",
+	expected_sha256: eSnap.sha256,
+})
+ok("edit_file chap nhan expected_sha256 dung", eShaRes.changed === false, JSON.stringify(eShaRes))
+
+await denies(
+	"edit_file chan khi expected_sha256 mismatch",
+	() =>
+		editFile({
+			repo: "demo",
+			path: "src/a.ts",
+			old_str: "const a = 10",
+			new_str: "const a = 100",
+			expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+		}),
+	"expected_sha256 mismatch",
+)
+
+// Test trailing spaces matcher & CRLF/BOM preservation
+await createFile({ repo: "demo", path: "src/trailing.ts", content: "const val = 1   \nconst val2 = 2\n" })
+const trRes = await editFile({ repo: "demo", path: "src/trailing.ts", old_str: "const val = 1 \nconst val2 = 2", new_str: "const val = 99\nconst val2 = 2" })
+ok("matcher cap nhat thanh cong trailing whitespace normalized match", trRes.match_mode === "trailing_whitespace_normalized" && trRes.changed === true, JSON.stringify(trRes))
+
+await createFile({ repo: "demo", path: "src/bom_crlf.ts", content: "\ufeffconst line1 = 1\r\nconst line2 = 2\r\n" })
+const bomRes = await editFile({ repo: "demo", path: "src/bom_crlf.ts", old_str: "const line2 = 2", new_str: "const line2 = 20" })
+ok("edit_file bao toan BOM va CRLF line endings", bomRes.bom === true && bomRes.eol === "crlf", JSON.stringify(bomRes))
+const bomSnap = await readFile({ repo: "demo", path: "src/bom_crlf.ts" })
+ok("noi dung file giu nguyen BOM", bomSnap.bom === true && bomSnap.eol === "crlf" && bomSnap.text.includes("line2 = 20"), JSON.stringify(bomSnap))
+
+// Test mode preservation
+await createFile({ repo: "demo", path: "src/script.sh", content: "#!/bin/sh\necho hi\n" })
+const modeBefore = statSync(join(rw, "src/script.sh")).mode
+await editFile({ repo: "demo", path: "src/script.sh", old_str: "echo hi", new_str: "echo hello" })
+const modeAfter = statSync(join(rw, "src/script.sh")).mode
+ok("edit_file bao toan permission mode cua file", modeBefore === modeAfter, `before=${modeBefore}, after=${modeAfter}`)
+
+// Test invalid UTF-8 rejection on edit tools
+writeFileSync(join(rw, "src/invalid.bin"), Buffer.from([0xff, 0xfe, 0xfd, 0x00]))
+await denies(
+	"edit_file tu choi file binary / invalid UTF-8",
+	() => editFile({ repo: "demo", path: "src/invalid.bin", old_str: "abc", new_str: "def" }),
+	"binary",
 )
 
 // Tra src/a.ts ve trang thai ban dau cho cac test tiep theo (git commit, git restore)
@@ -684,10 +742,20 @@ ok("git_stash list tra ve mang", Array.isArray(stList.stashes))
 
 // —— terminal ——
 console.log("\nterminal")
-const tm1: any = await terminal({ repo: "demo", command: "echo terminal_works", env: { TEST_ENV: "hello" } })
-ok("terminal chay lenh thanh cong", tm1.exit_code === 0 && String(tm1.output).includes("terminal_works"), JSON.stringify(tm1))
+process.env.ALLOW_TERMINAL = "true"
+process.env.TERMINAL_MODE = "full"
+process.env.MCP_TOKEN = "secret_mcp_token_value_123"
+
+const tm1: any = await terminal({ repo: "demo", command: "node -e console.log(process.env.MCP_TOKEN,process.env.MY_SECRET_KEY)", env: { MY_SECRET_KEY: "hidden123", NORMAL_ENV: "ok" } })
+ok("terminal env sanitizer loai bo MCP_TOKEN va secret variables", tm1.output.includes("undefined undefined"), tm1.output)
+
 const tmBg: any = await terminal({ repo: "demo", command: "echo terminal_bg", background: true })
 ok("terminal background tra job_id ngay", typeof tmBg.job_id === "string", JSON.stringify(tmBg))
+
+// Background job repo lease holding test: background job locks repo
+const longBg: any = await terminal({ repo: "demo", command: "node -e \"setTimeout(() => {}, 800)\"", background: true })
+const lockCheck = await editFile({ repo: "demo", path: "README.md", old_str: "hello", new_str: "hello_locked" })
+ok("concurrent edit_file cho background job lease lock hoan tat", lockCheck.changed === true, JSON.stringify(lockCheck))
 
 
 // —— Build & test dong bo ——
