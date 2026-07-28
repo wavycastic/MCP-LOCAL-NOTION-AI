@@ -35,10 +35,10 @@ export const applyPatchSchema = {
 		.describe("Tuong hop chong stale: hash sha256 ky vong cua cac file lien quan truoc khi sua"),
 }
 
-function isBinary(raw: string): boolean {
-	const sample = raw.slice(0, 8000)
+function isBufferBinary(buf: Buffer): boolean {
+	const sample = buf.subarray(0, Math.min(8000, buf.length))
 	for (let i = 0; i < sample.length; i++) {
-		if (sample.charCodeAt(i) === 0) return true
+		if (sample[i] === 0) return true
 	}
 	return false
 }
@@ -70,11 +70,11 @@ function generateDiff(changes: PlannedChange[]): string {
 		} else if (change.type === "update") {
 			lines.push(`--- a/${change.path}`)
 			lines.push(`+++ b/${change.path}`)
-			lines.push(`@@ update ${change.replacements} hunk(s) @@`)
+			lines.push(change.hunkDiff)
 		} else if (change.type === "move") {
 			lines.push(`--- a/${change.from}`)
 			lines.push(`+++ b/${change.to}`)
-			lines.push(`@@ move and update ${change.replacements} hunk(s) @@`)
+			lines.push(change.hunkDiff)
 		}
 	}
 	return lines.join("\n")
@@ -86,6 +86,7 @@ export async function applyPatch(a: {
 	dry_run?: boolean
 	expected_head_sha?: string
 	expected_files?: Array<{ path: string; sha256: string }>
+	__test_fail_commit?: boolean
 }) {
 	// Phase A: Parse
 	const parsed = parsePatch(a.patch_text)
@@ -110,26 +111,30 @@ export async function applyPatch(a: {
 		}
 	}
 
-	// Detect target path conflicts with canonicalization
-	const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase()
+	// Detect target path conflicts using resolved canonical absolute paths
+	const getCanonical = (p: string, isNew: boolean) => {
+		const abs = isNew ? safeResolveNew(repo.root, p) : safeResolve(repo.root, p)
+		return process.platform === "win32" ? abs.toLowerCase() : abs
+	}
+
 	const targets = new Set<string>()
 	const sources = new Set<string>()
 
 	for (const op of parsed.operations) {
 		if (op.kind === "add") {
-			const np = norm(op.path)
+			const np = getCanonical(op.path, true)
 			if (targets.has(np)) throw new Error(`apply_patch conflict: Path target bi trung: '${op.path}'`)
 			targets.add(np)
 		} else if (op.kind === "delete") {
-			const np = norm(op.path)
+			const np = getCanonical(op.path, false)
 			if (sources.has(np)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
 			sources.add(np)
 		} else if (op.kind === "update") {
-			const np = norm(op.path)
+			const np = getCanonical(op.path, false)
 			if (sources.has(np)) throw new Error(`apply_patch conflict: File '${op.path}' bi thao tac nhieu lan`)
 			sources.add(np)
 			if (op.moveTo) {
-				const nmp = norm(op.moveTo)
+				const nmp = getCanonical(op.moveTo, true)
 				if (targets.has(nmp)) throw new Error(`apply_patch conflict: Path move target bi trung: '${op.moveTo}'`)
 				targets.add(nmp)
 			} else {
@@ -156,11 +161,12 @@ export async function applyPatch(a: {
 			if (st.isDirectory()) {
 				throw new Error(`apply_patch verification failed: Delete File khong ho tro thu muc: '${op.path}'`)
 			}
-			const raw = readFileSync(abs, "utf8")
-			if (isBinary(raw)) {
+			const buf = readFileSync(abs)
+			if (isBufferBinary(buf)) {
 				throw new Error(`apply_patch does not support binary files: ${op.path}`)
 			}
-			const sha256 = createHash("sha256").update(raw).digest("hex")
+			const sha256 = createHash("sha256").update(buf).digest("hex")
+			const raw = buf.toString("utf8")
 			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256 })
 		} else if (op.kind === "update") {
 			if (isDeniedRelPath(op.path)) throw new Error(`Path nam trong deny-list: '${op.path}'`)
@@ -178,11 +184,12 @@ export async function applyPatch(a: {
 				}
 			}
 
-			const raw = readFileSync(srcAbs, "utf8")
-			if (isBinary(raw)) {
+			const buf = readFileSync(srcAbs)
+			if (isBufferBinary(buf)) {
 				throw new Error(`apply_patch does not support binary files: ${op.path}`)
 			}
-			const sha256 = createHash("sha256").update(raw).digest("hex")
+			const sha256 = createHash("sha256").update(buf).digest("hex")
+			const raw = buf.toString("utf8")
 			const eol = isCrlf(raw) ? "crlf" : "lf"
 			snapshots.set(op.path, { path: op.path, existed: true, content: raw, sha256, eol })
 		}
@@ -195,8 +202,11 @@ export async function applyPatch(a: {
 				throw new Error(`Path nam trong deny-list: '${ef.path}'`)
 			}
 			const abs = safeResolve(repo.root, ef.path)
-			const raw = readFileSync(abs, "utf8")
-			const actualHash = createHash("sha256").update(raw).digest("hex")
+			const buf = readFileSync(abs)
+			if (isBufferBinary(buf)) {
+				throw new Error(`apply_patch does not support binary files: ${ef.path}`)
+			}
+			const actualHash = createHash("sha256").update(buf).digest("hex")
 			if (actualHash !== ef.sha256) {
 				throw new Error(`expected_files sha256 mismatch cho '${ef.path}'`)
 			}
@@ -282,6 +292,10 @@ export async function applyPatch(a: {
 				const srcAbs = safeResolve(repo.root, change.from)
 				if (existsSync(srcAbs)) unlinkSync(srcAbs)
 			}
+		}
+
+		if (a.__test_fail_commit) {
+			throw new Error("Fault injection test error during commit phase")
 		}
 	} catch (commitErr: any) {
 		// Rollback best-effort

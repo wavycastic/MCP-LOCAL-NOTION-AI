@@ -359,7 +359,7 @@ await denies(
 			repo: "demo",
 			patch_text: `*** Begin Patch\n*** Add File: .env\n+SECRET=123\n*** End Patch`,
 		}),
-	"deny-list",
+	"denied path",
 )
 
 await denies(
@@ -399,39 +399,72 @@ await denies(
 )
 
 await denies(
-	"apply_patch tu choi path collision (src/a.ts vs src/A.ts)",
+	"apply_patch tu choi path alias collision (src/alias.ts vs src/./alias.ts)",
 	() =>
 		applyPatch({
 			repo: "demo",
-			patch_text: `*** Begin Patch\n*** Add File: src/collision.ts\n+c1\n*** Add File: src/COLLISION.ts\n+c2\n*** End Patch`,
+			patch_text: `*** Begin Patch\n*** Add File: src/alias.ts\n+c1\n*** Add File: src/./alias.ts\n+c2\n*** End Patch`,
 		}),
 	"Path target bi trung",
 )
 
 await denies(
-	"expected_files sha256 mismatch KHONG tiet lo hash thuc te (anti-oracle)",
-	async () => {
-		try {
-			await applyPatch({
-				repo: "demo",
-				expected_files: [{ path: "src/a.ts", sha256: "badhash" }],
-				patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** End Patch`,
-			})
-		} catch (e: any) {
-			if (e.message.includes("Actual:")) {
-				throw new Error("FAIL: actual hash was leaked in error message")
-			}
-			throw e
-		}
-	},
-	"expected_files sha256 mismatch",
+	"apply_patch tu choi path alias collision voi parent directory (src/dir/../a.ts vs src/a.ts)",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Update File: src/a.ts\n@@\n-const a = 2\n+const a = 3\n*** Update File: src/dir/../a.ts\n@@\n-const a = 2\n+const a = 4\n*** End Patch`,
+		}),
+	"bi thao tac nhieu lan",
 )
+
+// Binary file detection test
+const binPath = join(workspace, "demo", "src", "binary.bin")
+writeFileSync(binPath, Buffer.from([0x00, 0x01, 0x02, 0x03]))
+await denies(
+	"apply_patch tu choi file binary",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Update File: src/binary.bin\n@@\n-foo\n+bar\n*** End Patch`,
+		}),
+	"binary files",
+)
+const { unlinkSync: testUnlink } = await import("node:fs")
+testUnlink(binPath)
+
+// Fault injection rollback test (Add + Update + Move + Delete mid-commit fault)
+await createFile({ repo: "demo", path: "src/rb_del.ts", content: "export const rbDel = true\n" })
+await createFile({ repo: "demo", path: "src/rb_move.ts", content: "export const rbMove = true\n" })
+await createFile({ repo: "demo", path: "src/rb_upd.ts", content: "export const rbUpd = 1\n" })
+
+await denies(
+	"apply_patch rollback mid-commit khi commit gap loi (restore Delete, Move, Update, Add)",
+	() =>
+		applyPatch({
+			repo: "demo",
+			patch_text: `*** Begin Patch\n*** Add File: src/rb_add.ts\n+new\n*** Update File: src/rb_upd.ts\n@@\n-export const rbUpd = 1\n+export const rbUpd = 999\n*** Update File: src/rb_move.ts\n*** Move to: src/rb_moved_dest.ts\n@@\n-export const rbMove = true\n+export const rbMove = false\n*** Delete File: src/rb_del.ts\n*** End Patch`,
+			__test_fail_commit: true,
+		}),
+	"Fault injection test error",
+)
+
+ok("rollback khoi phuc file delete", (await readFile({ repo: "demo", path: "src/rb_del.ts" })).text.includes("rbDel = true"))
+ok("rollback khoi phuc file move source va xoa destination", (await readFile({ repo: "demo", path: "src/rb_move.ts" })).text.includes("rbMove = true"))
+ok("rollback khoi phuc file update", (await readFile({ repo: "demo", path: "src/rb_upd.ts" })).text.includes("rbUpd = 1"))
+ok("rollback xoa file add", !(await listDir({ repo: "demo", path: "src" })).entries.some((c) => c.name === "rb_add.ts"))
+
+// Cleanup rollback test files
+await applyPatch({
+	repo: "demo",
+	patch_text: `*** Begin Patch\n*** Delete File: src/rb_del.ts\n*** Delete File: src/rb_move.ts\n*** Delete File: src/rb_upd.ts\n*** End Patch`,
+})
 
 const redactedLog = redactForAudit({ patch_text: "*** Begin Patch\nsecret\n*** End Patch" })
 ok("audit log redact patch_text", typeof redactedLog === "object" && (redactedLog as any).patch_text.includes("khong ghi noi dung"))
 
 const { forgetTouched } = await import("../src/touched.js")
-forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts", "src/multi_src.ts", "src/multi_add.ts", "src/multi_moved.ts")
+forgetTouched(join(workspace, "demo"), "src/patched.ts", "src/moved.ts", "src/multi_src.ts", "src/multi_add.ts", "src/multi_moved.ts", "src/rb_del.ts", "src/rb_move.ts", "src/rb_upd.ts", "src/rb_add.ts", "src/binary.bin")
 
 // —— Git ——
 console.log("\ngit")

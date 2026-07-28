@@ -59,6 +59,7 @@ export type PlannedChange =
 			sha256Before: string
 			sha256After: string
 			replacements: number
+			hunkDiff: string
 	  }
 	| {
 			type: "move"
@@ -71,6 +72,7 @@ export type PlannedChange =
 			sha256Before: string
 			sha256After: string
 			replacements: number
+			hunkDiff: string
 	  }
 	| {
 			type: "delete"

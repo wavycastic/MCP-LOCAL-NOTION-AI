@@ -139,6 +139,18 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 			const sha256Before = snap.sha256 ?? createHash("sha256").update(raw).digest("hex")
 			const sha256After = createHash("sha256").update(finalStr).digest("hex")
 
+			const hunkDiffLines: string[] = []
+			for (let hIdx = 0; hIdx < op.hunks.length; hIdx++) {
+				const hunk = op.hunks[hIdx]
+				hunkDiffLines.push(`@@ ${hunk.header ? hunk.header : `hunk ${hIdx + 1}`} @@`)
+				for (const line of hunk.lines) {
+					if (line.type === "context") hunkDiffLines.push(` ${line.text}`)
+					else if (line.type === "delete") hunkDiffLines.push(`-${line.text}`)
+					else if (line.type === "add") hunkDiffLines.push(`+${line.text}`)
+				}
+			}
+			const hunkDiff = hunkDiffLines.join("\n")
+
 			if (op.moveTo) {
 				changes.push({
 					type: "move",
@@ -151,6 +163,7 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 					sha256Before,
 					sha256After,
 					replacements: totalReplacements,
+					hunkDiff,
 				})
 			} else {
 				changes.push({
@@ -163,6 +176,7 @@ export function buildPlan(operations: FileOperation[], snapshots: Map<string, Fi
 					sha256Before,
 					sha256After,
 					replacements: totalReplacements,
+					hunkDiff,
 				})
 			}
 		}
