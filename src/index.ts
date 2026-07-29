@@ -15,6 +15,7 @@ import { killAllPtySessions } from "./ptySessions.js"
 import { lockState } from "./lock.js"
 import { allRepos } from "./repos.js"
 import { registerAll } from "./tools/index.js"
+import { replayPendingQueues } from "./flowlens.js"
 
 function tokenOk(header?: string): boolean {
 	const got = header?.replace(/^Bearer\s+/i, "") ?? ""
@@ -93,6 +94,8 @@ const httpServer = app.listen(PORT, HOST, () => {
 				`  ${r.write ? "rw" : "ro"}  ${r.name.padEnd(24)} ${r.toolchain.padEnd(8)} ${r.root}`,
 			)
 		}
+		// Replay pending-index queues after restart (fire-and-forget)
+		replayPendingQueues(repos).catch((e) => console.warn("[pendingQueue] startup replay error:", e))
 	} catch (e) {
 		console.error("khong load duoc danh sach repo:", e)
 	}

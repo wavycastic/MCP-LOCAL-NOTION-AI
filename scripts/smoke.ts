@@ -869,6 +869,44 @@ ok("truong ngan van giu nguyen", red.path === "src/a.ts")
 const redPty = redactForAudit({ data: "PASSWORD_TYPED_INTO_PTY" }) as Record<string, unknown>
 ok("audit khong ghi raw PTY input", !String(redPty.data).includes("PASSWORD_TYPED_INTO_PTY"), String(redPty.data))
 
+// —— Pending queue (P0 #2) ——
+console.log("\npending queue")
+const { enqueueFiles, peekQueue, clearQueue, queueDepth } = await import("../src/pendingQueue.js")
+const qRoot = rw
+
+// Dọn sạch trước
+clearQueue(qRoot)
+ok("peekQueue rong khi chua co queue", peekQueue(qRoot).length === 0)
+ok("queueDepth = 0 khi chua co queue", queueDepth(qRoot) === 0)
+
+enqueueFiles(qRoot, ["src/foo.ts", "src/bar.ts"])
+ok("enqueueFiles ghi duoc 2 file", peekQueue(qRoot).length === 2)
+ok("queueDepth = 2 sau enqueue", queueDepth(qRoot) === 2)
+ok("peekQueue chua foo.ts", peekQueue(qRoot).includes("src/foo.ts"))
+ok("peekQueue chua bar.ts", peekQueue(qRoot).includes("src/bar.ts"))
+
+// Enqueue them, file trung phai duoc dedup
+enqueueFiles(qRoot, ["src/foo.ts", "src/baz.ts"])
+ok("peekQueue dedup file trung", peekQueue(qRoot).length === 3)
+ok("peekQueue chua baz.ts moi", peekQueue(qRoot).includes("src/baz.ts"))
+
+// enqueueFiles bo qua mang rong
+enqueueFiles(qRoot, [])
+ok("enqueueFiles bo qua mang rong", queueDepth(qRoot) === 3)
+
+// clearQueue xoa file
+clearQueue(qRoot)
+ok("clearQueue xoa het queue", peekQueue(qRoot).length === 0)
+ok("clearQueue idempotent (goi lan 2)", peekQueue(qRoot).length === 0)
+
+// clearQueue khong throw khi queue chua ton tai
+try {
+	clearQueue(qRoot)
+	ok("clearQueue khong throw khi file khong ton tai", true)
+} catch {
+	ok("clearQueue khong throw khi file khong ton tai", false)
+}
+
 // —— Cau hinh sai phai sap ngay, khong duoc chay tiep ——
 console.log("\ncau hinh sai")
 writeFileSync(
