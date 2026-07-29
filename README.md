@@ -77,6 +77,10 @@ o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
 Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 `repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
 
+## Release 4: Agent UX
+
+`repo_overview` va `inspect_codebase` dung cung `repo` name voi execution tools, mac dinh `output_mode: summary`, va ho tro `minimal | summary | full`. Budget `small | medium | large | custom` gioi han token, file, symbol, graph depth va output bytes. Dat `TOOL_PROFILE=agent` de dung registry gon, uu tien cac composite intelligence/edit/verify tools thay vi toan bo primitive.
+
 ## 43 tool
 
 | Tool | Viec |

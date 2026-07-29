@@ -70,10 +70,12 @@ const CORE_ALLOWED = new Set([
 	"find_symbol", "explain_symbol", "find_references", "trace_flow",
 	"what_breaks",
 ])
+const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status"])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
 	if (TOOL_PROFILE === "safe" && (opts.destructive || opts.openWorld || name === "git_push")) return
 	if (TOOL_PROFILE === "core" && !CORE_ALLOWED.has(name)) return
+	if (TOOL_PROFILE === "agent" && !AGENT_ALLOWED.has(name)) return
 	const readOnly = opts.readOnly ?? false
 
 	s.registerTool(
