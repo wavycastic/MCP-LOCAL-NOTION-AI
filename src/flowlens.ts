@@ -1,8 +1,104 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./exec.js";
 import type { Repo } from "./repos.js";
+
+// ---------------------------------------------------------------------------
+// Error codes
+// ---------------------------------------------------------------------------
+
+export type FlowLensErrorCode =
+  | "cli_missing"
+  | "timeout"
+  | "parse_error"
+  | "crash"
+  | "output_truncated"
+  | "validation_error"
+  | "version_mismatch";
+
+const MIN_SUPPORTED_VERSION = "0.5.0";
+const CURRENT_PROTOCOL_VERSION = 1;
+
+// ---------------------------------------------------------------------------
+// Probe / handshake
+// ---------------------------------------------------------------------------
+
+export type FlowLensProbeResult =
+  | { available: true; version: string; protocolVersion: number; capabilities: string[]; cliPath: string }
+  | { available: false; errorCode: FlowLensErrorCode; error: string };
+
+/** Cached per CLI path */
+const probeCache = new Map<string, FlowLensProbeResult>();
+
+/** Detect capabilities from flowlens CLI (cached per process lifetime). */
+export async function probeFlowLens(): Promise<FlowLensProbeResult> {
+  const cli = resolveFlowLensCli();
+  if (!cli) {
+    return { available: false, errorCode: "cli_missing", error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
+  }
+  const cached = probeCache.get(cli);
+  if (cached) return cached;
+
+  const version = await detectFlowLensVersion(cli);
+  if (!version) {
+    const result: FlowLensProbeResult = { available: false, errorCode: "crash", error: `FlowLens CLI found at ${cli} but could not determine version.` };
+    probeCache.set(cli, result);
+    return result;
+  }
+
+  const capabilities = inferCapabilities(version);
+  const result: FlowLensProbeResult = {
+    available: true,
+    version,
+    protocolVersion: CURRENT_PROTOCOL_VERSION,
+    capabilities,
+    cliPath: cli,
+  };
+  probeCache.set(cli, result);
+  return result;
+}
+
+async function detectFlowLensVersion(cli: string): Promise<string | undefined> {
+  // Try reading package.json adjacent to the CLI first (fast, no spawn)
+  try {
+    const pkgPath = resolve(dirname(cli), "..", "..", "package.json");
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
+      if (typeof pkg.version === "string" && pkg.version) return pkg.version;
+    }
+  } catch { /* fallthrough */ }
+  // Fallback: spawn `node cli.js --version` and parse output
+  try {
+    const result = await run([process.execPath, cli, "--version"], { cwd: process.cwd(), timeoutMs: 10_000, maxOutputBytes: 4096 });
+    const raw = (result.stdout + result.stderr).trim();
+    const match = raw.match(/\d+\.\d+\.\d+/);
+    return match ? match[0] : undefined;
+  } catch { return undefined; }
+}
+
+function inferCapabilities(version: string): string[] {
+  const caps: string[] = ["code-search", "index-files", "repo-overview", "inspect-codebase"];
+  const [major, minor] = version.split(".").map(Number);
+  if ((major ?? 0) >= 1 || ((major ?? 0) === 0 && (minor ?? 0) >= 6)) {
+    caps.push("output-modes", "multidimensional-budgets", "semantic-search");
+  }
+  if ((major ?? 0) >= 1 || ((major ?? 0) === 0 && (minor ?? 0) >= 7)) {
+    caps.push("search-code", "prepare-change", "can-edit", "verify-change");
+  }
+  return caps;
+}
+
+// ---------------------------------------------------------------------------
+// Per-command timeout (ms)
+// ---------------------------------------------------------------------------
+
+const COMMAND_TIMEOUT_MS: Partial<Record<FlowLensCommand, number>> = {
+  "index-files": 120_000,
+  "repo-overview": 90_000,
+  "inspect-codebase": 90_000,
+};
+const DEFAULT_INTELLIGENCE_TIMEOUT_MS = 60_000;
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
@@ -44,10 +140,19 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     }
   }
   argv.push("--json");
-  const result = await run(argv, { cwd: repo.root, timeoutMs: 120_000, maxOutputBytes: 2_000_000 });
-  if (result.code !== 0) return { available: true, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: result.stderr.trim() || result.stdout.trim() || `FlowLens exited with code ${result.code}` };
+  const timeoutMs = COMMAND_TIMEOUT_MS[command] ?? DEFAULT_INTELLIGENCE_TIMEOUT_MS;
+  const result = await run(argv, { cwd: repo.root, timeoutMs, maxOutputBytes: 2_000_000 });
+  const pending = options.changedFiles?.length ?? 0;
+  if (result.timedOut) return { available: true, stale: true, changedFilesPending: pending, errorCode: "timeout" as FlowLensErrorCode, error: `FlowLens command '${command}' timed out after ${timeoutMs / 1000}s` };
+  if (result.outputTruncated && result.code !== 0) return { available: true, stale: true, changedFilesPending: pending, errorCode: "output_truncated" as FlowLensErrorCode, error: "FlowLens output exceeded 2 MB limit" };
+  if (result.code !== 0) {
+    const raw = result.stderr.trim() || result.stdout.trim() || `FlowLens exited with code ${result.code}`;
+    const isValidation = raw.includes("validation") || raw.includes("invalid") || raw.includes("required") || raw.includes("INVALID_");
+    const errorCode: FlowLensErrorCode = isValidation ? "validation_error" : "crash";
+    return { available: true, stale: true, changedFilesPending: pending, errorCode, error: raw };
+  }
   try { return JSON.parse(result.stdout); }
-  catch { return { available: true, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens returned invalid JSON.", output: result.stdout.slice(-4_000) }; }
+  catch { return { available: true, stale: true, changedFilesPending: pending, errorCode: "parse_error" as FlowLensErrorCode, error: "FlowLens returned invalid JSON.", output: result.stdout.slice(-4_000) }; }
 }
 
 export async function syncFlowLensAfterTool(repo: Repo, tool: string, output: unknown) {
