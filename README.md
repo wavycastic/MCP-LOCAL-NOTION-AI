@@ -88,7 +88,7 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `glob_files` | Tim file theo glob; regex/result cache 250ms, tu invalidate sau write; ripgrep/git fallback |
 | `ripgrep` | Tim chuoi/regex. `all_repos: true` de tim xuyen repo |
 | `repo_overview` | Facade FlowLens tra ban do repo va freshness cua persistent index |
-| `inspect_codebase` | Composite retrieval: FTS5/BM25, symbol/route, graph expansion, rerank, context pack |
+| `inspect_codebase` | Hybrid retrieval: FTS5/BM25, local embeddings, symbol/route, graph expansion, rerank, context pack |
 | `read_context` | Doc range co merge overlap, line numbers, byte/file budget va content hash |
 | `index_files` | Khoi tao hoac cap nhat changed-file incremental index cua FlowLens |
 | `find_symbol` | Tim workspace/document symbol TS/JS bang language service |

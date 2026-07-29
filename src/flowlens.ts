@@ -8,7 +8,7 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
 type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks";
 
-export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number } = {}) {
+export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number } = {}) {
   const cli = resolveFlowLensCli();
   if (!cli) return { available: false, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
   const argv = [process.execPath, cli, command];
@@ -24,6 +24,7 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (command === "what-breaks") argv.push(options.target ?? "");
     argv.push("--project", repo.root);
     if (command === "inspect-codebase" && options.includeTests) argv.push("--include-tests");
+    if (command === "inspect-codebase" && options.semantic === false) argv.push("--no-semantic");
     if (command === "inspect-codebase" && options.limit) argv.push("--limit", String(options.limit));
     if ((command === "find-symbol" || command === "find-references") && options.limit) argv.push("--limit", String(options.limit));
     if ((command === "find-symbol" || command === "find-references" || command === "explain-symbol-lsp") && options.file) argv.push("--file", options.file);
