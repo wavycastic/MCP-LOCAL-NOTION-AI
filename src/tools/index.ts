@@ -5,7 +5,7 @@ import { withLock } from "../lock.js"
 import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
 import { syncFlowLensAfterTool } from "../flowlens.js"
-import { explainSymbol, explainSymbolSchema, findReferences, findReferencesSchema, findSymbol, findSymbolSchema, indexFiles, indexFilesSchema, inspectCodebase, inspectCodebaseSchema, readContext, readContextSchema, repoOverview, repoOverviewSchema, traceFlow, traceFlowSchema, whatBreaks, whatBreaksSchema } from "./codeUnderstanding.js"
+import { canEdit, canEditSchema, explainSymbol, explainSymbolSchema, findReferences, findReferencesSchema, findSymbol, findSymbolSchema, indexFiles, indexFilesSchema, inspectCodebase, inspectCodebaseSchema, prepareChange, prepareChangeSchema, readContext, readContextSchema, repoOverview, repoOverviewSchema, searchCode, searchCodeSchema, traceFlow, traceFlowSchema, verifyChange, verifyChangeSchema, whatBreaks, whatBreaksSchema } from "./codeUnderstanding.js"
 import { createFile, createFileSchema } from "./createFile.js"
 import { applyPatch, applyPatchSchema } from "./applyPatch.js"
 import { editFile, editFileSchema } from "./editFile.js"
@@ -68,9 +68,9 @@ const CORE_ALLOWED = new Set([
 	"git_commit", "reindex",
 	"repo_overview", "inspect_codebase", "read_context", "index_files",
 	"find_symbol", "explain_symbol", "find_references", "trace_flow",
-	"what_breaks",
+	"what_breaks", "search_code", "prepare_change", "can_edit", "verify_change",
 ])
-const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status"])
+const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status", "search_code", "prepare_change", "can_edit", "verify_change"])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
 	if (TOOL_PROFILE === "safe" && (opts.destructive || opts.openWorld || name === "git_push")) return
@@ -128,6 +128,10 @@ export function registerAll(s: McpServer) {
 	reg(s, "find_references", "Tim references chinh xac bang language service, gom definition va write-access metadata.", findReferencesSchema, findReferences, { readOnly: true })
 	reg(s, "trace_flow", "Trace execution flow qua graph tu symbol nguon den dich, hoac downstream co gioi han.", traceFlowSchema, traceFlow, { readOnly: true })
 	reg(s, "what_breaks", "Phan tich blast radius upstream/downstream, related tests va unknowns tu FlowLens graph.", whatBreaksSchema, whatBreaks, { readOnly: true })
+	reg(s, "search_code", "Tim kiem multi-channel (FTS, graph, semantic) trong codebase qua FlowLens: tra ve context pack, symbols, routes co lien quan.", searchCodeSchema, searchCode, { readOnly: true })
+	reg(s, "prepare_change", "Lap ke hoach thay doi: FlowLens tim entry point, impact graph, required reads va test scope cho intent.", prepareChangeSchema, prepareChange, { readOnly: true })
+	reg(s, "can_edit", "Kiem tra an toan va co the chinh sua file/symbol cu the: tra ve risk level, contracts can kiem tra va dieu kien tien quyet.", canEditSchema, canEdit, { readOnly: true })
+	reg(s, "verify_change", "Xac nhan thay doi sau edit: so sanh diff voi plan, phat hien contract risks, verification checks va red flags.", verifyChangeSchema, verifyChange, { readOnly: true })
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace 1 vi tri.", editFileSchema, editFile)
 	reg(s, "multi_edit_file", "Sua NHIEU VI TRI trong 1 file trong 1 LAN GOI DUY NHAT (nguyen tu: all-or-nothing).", multiEditFileSchema, multiEditFile)
 	reg(s, "apply_patch", "Ap dung patch nhieu hunk/file trong mot thao tac duy nhat.", applyPatchSchema, applyPatch, { destructive: true })
