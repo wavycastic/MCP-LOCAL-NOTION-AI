@@ -44,6 +44,9 @@ import {
 	terminalWaitFor, terminalWaitForSchema,
 	terminalWrite, terminalWriteSchema,
 } from "./pty.js"
+import { healthCheck, healthCheckSchema, readinessCheck, readinessCheckSchema } from "./healthCheck.js"
+import { getMetrics, getMetricsSchema } from "./getMetrics.js"
+import { recordToolCall } from "../metrics.js"
 
 type Handler = (args: any) => Promise<unknown>
 type Opts = {
@@ -70,6 +73,7 @@ const CORE_ALLOWED = new Set([
 	"repo_overview", "inspect_codebase", "read_context", "index_files",
 	"find_symbol", "explain_symbol", "find_references", "trace_flow",
 	"what_breaks", "search_code", "prepare_change", "can_edit", "verify_change",
+	"health_check", "readiness_check", "get_metrics",
 ])
 const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status", "search_code", "prepare_change", "can_edit", "verify_change"])
 
@@ -92,6 +96,7 @@ function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler,
 			},
 		},
 		async (args: any) => {
+			const t0 = Date.now()
 			const exec = async () => fn(args ?? {})
 			try {
 				const out = readOnly || opts.managesOwnLease
@@ -103,10 +108,12 @@ function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler,
 					? { ...(out as Record<string, unknown>), flowlens_index: flowlensIndex }
 					: out
 				audit(name, args, true)
+				recordToolCall(name, Date.now() - t0, true)
 				return { content: [{ type: "text" as const, text: JSON.stringify(response) }] }
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
 				audit(name, args, false, msg)
+				recordToolCall(name, Date.now() - t0, false, msg)
 				return { isError: true, content: [{ type: "text" as const, text: `${name} failed: ${msg}` }] }
 			}
 		},
@@ -164,4 +171,7 @@ export function registerAll(s: McpServer) {
 	reg(s, "terminal_close", "Dong va kill PTY session.", terminalCloseSchema, terminalClose, { destructive: true, openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_list", "Liet ke PTY sessions va trang thai, khong tra command/input raw.", terminalListSchema, terminalList, { readOnly: true, openWorld: true, managesOwnLease: true })
 	reg(s, "reindex", "Chay lai lenh index code graph cua repo.", reindexSchema, reindex)
+	reg(s, "health_check", "Kiem tra process con song: tra uptime, PID va Node version. Khong tiet lo config nhay cam.", healthCheckSchema, healthCheck, { readOnly: true })
+	reg(s, "readiness_check", "Kiem tra readiness: config hop le, repo registry, git validity va FlowLens sidecar status.", readinessCheckSchema, readinessCheck, { readOnly: true })
+	reg(s, "get_metrics", "Lay metrics: tool call counts, durations, FlowLens sidecar timeouts/crashes, PTY sessions va buffer drops.", getMetricsSchema, getMetrics, { readOnly: true })
 }
