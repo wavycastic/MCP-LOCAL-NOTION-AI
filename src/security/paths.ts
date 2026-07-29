@@ -6,10 +6,15 @@ export const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
 const DENY: RegExp[] = [
 	/(^|\/)\.env(\..*)?$/,
 	/(^|\/)\.git\/(config|credentials)$/,
+	// .git/hooks/ can be weaponised for code execution — deny all hook scripts
+	/(^|\/)\.git\/hooks\//,
 	/\.(pem|key|pfx|p12|jks)$/i,
 	/(^|\/)secrets?(\/|$)/i,
 	/(^|\/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/,
 	/(^|\/)\.npmrc$/,
+	// SSH keys and known_hosts
+	/(^|\/)(\.ssh)(\/|$)/i,
+	/(^|\/)known_hosts$/,
 ]
 
 export class PathDenied extends Error {}

@@ -85,8 +85,10 @@ export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
 /**
  * Che do toan quyen may cuc bo. Khi bat, them repo ao "system" cho phep dung
  * duong dan tuyet doi (C:\..., E:\...) va chay terminal o bat ky thu muc nao.
+ *
+ * Mac dinh FALSE (fail-closed). Dat ALLOW_FULL_ACCESS=true de mo.
  */
-export const ALLOW_FULL_ACCESS = bool("ALLOW_FULL_ACCESS", true)
+export const ALLOW_FULL_ACCESS = bool("ALLOW_FULL_ACCESS", false)
 
 /** Prefix branch cho phep ghi, dung khi repo khong khai bao rieng. */
 export const DEFAULT_BRANCH_PREFIX = process.env.DEFAULT_BRANCH_PREFIX ?? "agent/"
