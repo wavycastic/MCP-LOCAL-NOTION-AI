@@ -73,6 +73,7 @@ process.env.ALLOW_TERMINAL = "true"
 // Smoke kiem tra sandbox theo repo; tat repo ao `system` cua che do Full Access.
 process.env.ALLOW_FULL_ACCESS = "false"
 process.env.AUTO_DISCOVERED_WRITE = "false"
+process.env.FLOWLENS_AUTO_INDEX = "false"
 process.env.MAX_READ_BYTES = "5000" // ha tran cho de test, moi file thuc te deu nho hon
 process.env.MAX_WRITE_BYTES = "5000"
 
