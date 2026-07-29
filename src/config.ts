@@ -143,10 +143,10 @@ export const PTY_MAX_INPUT_CHARS = Number(process.env.PTY_MAX_INPUT_CHARS ?? 100
 export const PTY_IDLE_TIMEOUT_MS = Number(process.env.PTY_IDLE_TIMEOUT_MS ?? 30 * 60_000)
 export const PTY_MAX_LIFETIME_MS = Number(process.env.PTY_MAX_LIFETIME_MS ?? 4 * 60 * 60_000)
 
-export type ToolProfile = "core" | "safe" | "full"
+export type ToolProfile = "agent" | "core" | "safe" | "full"
 const rawProfile = (process.env.TOOL_PROFILE ?? "full").toLowerCase()
 export const TOOL_PROFILE: ToolProfile =
-	rawProfile === "core" ? "core" : rawProfile === "safe" ? "safe" : "full"
+	rawProfile === "agent" ? "agent" : rawProfile === "core" ? "core" : rawProfile === "safe" ? "safe" : "full"
 
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
 export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")

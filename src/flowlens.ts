@@ -8,7 +8,7 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
 type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks";
 
-export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number } = {}) {
+export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number; outputMode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; maxContextTokens?: number; maxFiles?: number; maxSymbols?: number; maxGraphDepth?: number; maxOutputBytes?: number } = {}) {
   const cli = resolveFlowLensCli();
   if (!cli) return { available: false, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
   const argv = [process.execPath, cli, command];
@@ -37,6 +37,11 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (command === "what-breaks" && options.direction) argv.push("--direction", options.direction);
     if (command === "what-breaks" && options.maxDepth) argv.push("--max-depth", String(options.maxDepth));
     if (command === "what-breaks" && options.includeTests) argv.push("--include-tests");
+    if ((command === "repo-overview" || command === "inspect-codebase") && options.outputMode) argv.push("--output-mode", options.outputMode);
+    if ((command === "repo-overview" || command === "inspect-codebase") && options.budget) argv.push("--budget", options.budget);
+    for (const [flag, value] of [["--max-context-tokens", options.maxContextTokens], ["--max-files", options.maxFiles], ["--max-symbols", options.maxSymbols], ["--max-graph-depth", options.maxGraphDepth], ["--max-output-bytes", options.maxOutputBytes]] as const) {
+      if ((command === "repo-overview" || command === "inspect-codebase") && value !== undefined) argv.push(flag, String(value));
+    }
   }
   argv.push("--json");
   const result = await run(argv, { cwd: repo.root, timeoutMs: 120_000, maxOutputBytes: 2_000_000 });

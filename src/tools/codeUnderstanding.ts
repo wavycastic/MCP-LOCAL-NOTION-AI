@@ -4,13 +4,19 @@ import { runFlowLens } from "../flowlens.js";
 import { resolveRepo } from "../repos.js";
 import { safeResolve } from "../security/paths.js";
 
-export const repoOverviewSchema = { repo: z.string().optional().describe("Ten repo (xem list_repos)") };
+const agentUxSchema = {
+  output_mode: z.enum(["minimal", "summary", "full"]).optional().describe("Muc chi tiet output; mac dinh summary"),
+  budget: z.enum(["small", "medium", "large", "custom"]).optional().describe("Context budget; mac dinh medium"),
+  max_context_tokens: z.number().int().positive().optional(), max_files: z.number().int().positive().optional(), max_symbols: z.number().int().positive().optional(), max_graph_depth: z.number().int().positive().optional(), max_output_bytes: z.number().int().positive().optional(),
+};
+export const repoOverviewSchema = { repo: z.string().optional().describe("Ten repo (xem list_repos)"), ...agentUxSchema };
 export const inspectCodebaseSchema = {
   repo: z.string().optional().describe("Ten repo (xem list_repos)"),
   query: z.string().min(1).describe("Cau hoi tu nhien ve codebase"),
   include_tests: z.boolean().optional().describe("Bao gom test lien quan; mac dinh true"),
   semantic: z.boolean().optional().describe("Dung local embedding candidates; mac dinh true"),
   limit: z.number().int().min(1).max(50).optional().describe("So candidate toi da"),
+  ...agentUxSchema,
 };
 export const indexFilesSchema = {
   repo: z.string().optional().describe("Ten repo (xem list_repos)"),
@@ -35,14 +41,16 @@ export const explainSymbolSchema = { ...symbolBaseSchema, rename_to: z.string().
 export const traceFlowSchema = { repo: z.string().optional().describe("Ten repo (xem list_repos)"), from: z.string().min(1), to: z.string().min(1).optional(), max_depth: z.number().int().min(1).max(20).optional(), limit: z.number().int().min(1).max(100).optional() };
 export const whatBreaksSchema = { repo: z.string().optional().describe("Ten repo (xem list_repos)"), target: z.string().min(1), direction: z.enum(["upstream", "downstream", "bidirectional"]).optional(), max_depth: z.number().int().min(0).max(20).optional(), include_tests: z.boolean().optional() };
 
-export async function repoOverview(a: { repo?: string }) {
+type AgentUxArgs = { output_mode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; max_context_tokens?: number; max_files?: number; max_symbols?: number; max_graph_depth?: number; max_output_bytes?: number };
+function agentUx(a: AgentUxArgs) { return { outputMode: a.output_mode, budget: a.budget, maxContextTokens: a.max_context_tokens, maxFiles: a.max_files, maxSymbols: a.max_symbols, maxGraphDepth: a.max_graph_depth, maxOutputBytes: a.max_output_bytes }; }
+export async function repoOverview(a: { repo?: string } & AgentUxArgs) {
   const repo = resolveRepo(a.repo);
-  return { repo: repo.name, ...(await runFlowLens(repo, "repo-overview")) };
+  return { repo: repo.name, ...(await runFlowLens(repo, "repo-overview", agentUx(a))) };
 }
 
-export async function inspectCodebase(a: { repo?: string; query: string; include_tests?: boolean; semantic?: boolean; limit?: number }) {
+export async function inspectCodebase(a: { repo?: string; query: string; include_tests?: boolean; semantic?: boolean; limit?: number } & AgentUxArgs) {
   const repo = resolveRepo(a.repo);
-  return { repo: repo.name, ...(await runFlowLens(repo, "inspect-codebase", { query: a.query, includeTests: a.include_tests ?? true, semantic: a.semantic ?? true, limit: a.limit })) };
+  return { repo: repo.name, ...(await runFlowLens(repo, "inspect-codebase", { query: a.query, includeTests: a.include_tests ?? true, semantic: a.semantic ?? true, limit: a.limit, ...agentUx(a) })) };
 }
 
 export async function indexFiles(a: { repo?: string; changed_files?: string[] }) {
