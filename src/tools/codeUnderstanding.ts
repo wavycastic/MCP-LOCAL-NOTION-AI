@@ -9,6 +9,7 @@ export const inspectCodebaseSchema = {
   repo: z.string().optional().describe("Ten repo (xem list_repos)"),
   query: z.string().min(1).describe("Cau hoi tu nhien ve codebase"),
   include_tests: z.boolean().optional().describe("Bao gom test lien quan; mac dinh true"),
+  semantic: z.boolean().optional().describe("Dung local embedding candidates; mac dinh true"),
   limit: z.number().int().min(1).max(50).optional().describe("So candidate toi da"),
 };
 export const indexFilesSchema = {
@@ -39,9 +40,9 @@ export async function repoOverview(a: { repo?: string }) {
   return { repo: repo.name, ...(await runFlowLens(repo, "repo-overview")) };
 }
 
-export async function inspectCodebase(a: { repo?: string; query: string; include_tests?: boolean; limit?: number }) {
+export async function inspectCodebase(a: { repo?: string; query: string; include_tests?: boolean; semantic?: boolean; limit?: number }) {
   const repo = resolveRepo(a.repo);
-  return { repo: repo.name, ...(await runFlowLens(repo, "inspect-codebase", { query: a.query, includeTests: a.include_tests ?? true, limit: a.limit })) };
+  return { repo: repo.name, ...(await runFlowLens(repo, "inspect-codebase", { query: a.query, includeTests: a.include_tests ?? true, semantic: a.semantic ?? true, limit: a.limit })) };
 }
 
 export async function indexFiles(a: { repo?: string; changed_files?: string[] }) {
