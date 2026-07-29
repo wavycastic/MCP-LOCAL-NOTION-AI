@@ -5,7 +5,7 @@ import { withLock } from "../lock.js"
 import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
 import { syncFlowLensAfterTool } from "../flowlens.js"
-import { indexFiles, indexFilesSchema, inspectCodebase, inspectCodebaseSchema, readContext, readContextSchema, repoOverview, repoOverviewSchema } from "./codeUnderstanding.js"
+import { explainSymbol, explainSymbolSchema, findReferences, findReferencesSchema, findSymbol, findSymbolSchema, indexFiles, indexFilesSchema, inspectCodebase, inspectCodebaseSchema, readContext, readContextSchema, repoOverview, repoOverviewSchema, traceFlow, traceFlowSchema, whatBreaks, whatBreaksSchema } from "./codeUnderstanding.js"
 import { createFile, createFileSchema } from "./createFile.js"
 import { applyPatch, applyPatchSchema } from "./applyPatch.js"
 import { editFile, editFileSchema } from "./editFile.js"
@@ -67,6 +67,8 @@ const CORE_ALLOWED = new Set([
 	"run_typecheck", "job_status", "git_status", "git_diff", "git_log", "git_branch",
 	"git_commit", "reindex",
 	"repo_overview", "inspect_codebase", "read_context", "index_files",
+	"find_symbol", "explain_symbol", "find_references", "trace_flow",
+	"what_breaks",
 ])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
@@ -119,6 +121,11 @@ export function registerAll(s: McpServer) {
 	reg(s, "inspect_codebase", "Composite code understanding: search, symbol/route, graph expansion, rerank va context packing trong mot call.", inspectCodebaseSchema, inspectCodebase, { readOnly: true })
 	reg(s, "read_context", "Doc cac source range, tu gop overlap, giu line, gioi han byte/file, tra SHA va phan bi bo.", readContextSchema, readContext, { readOnly: true })
 	reg(s, "index_files", "Khoi tao hoac cap nhat incremental SQLite FTS5 FlowLens cho repo. Truyen changed_files sau write.", indexFilesSchema, indexFiles)
+	reg(s, "find_symbol", "Tim workspace/document symbol chinh xac bang TypeScript/JavaScript language service.", findSymbolSchema, findSymbol, { readOnly: true })
+	reg(s, "explain_symbol", "Giai thich symbol bang LSP: definition, hover/type, references, diagnostics, rename preview va code actions.", explainSymbolSchema, explainSymbol, { readOnly: true })
+	reg(s, "find_references", "Tim references chinh xac bang language service, gom definition va write-access metadata.", findReferencesSchema, findReferences, { readOnly: true })
+	reg(s, "trace_flow", "Trace execution flow qua graph tu symbol nguon den dich, hoac downstream co gioi han.", traceFlowSchema, traceFlow, { readOnly: true })
+	reg(s, "what_breaks", "Phan tich blast radius upstream/downstream, related tests va unknowns tu FlowLens graph.", whatBreaksSchema, whatBreaks, { readOnly: true })
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace 1 vi tri.", editFileSchema, editFile)
 	reg(s, "multi_edit_file", "Sua NHIEU VI TRI trong 1 file trong 1 LAN GOI DUY NHAT (nguyen tu: all-or-nothing).", multiEditFileSchema, multiEditFile)
 	reg(s, "apply_patch", "Ap dung patch nhieu hunk/file trong mot thao tac duy nhat.", applyPatchSchema, applyPatch, { destructive: true })
