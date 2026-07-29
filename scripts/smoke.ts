@@ -111,6 +111,9 @@ const {
 } = await import("../src/tools/pty.js")
 const { jobStatus } = await import("../src/tools/jobStatus.js")
 const { killJob } = await import("../src/tools/killJob.js")
+const { probeFlowLens, replayPendingQueues } = await import("../src/flowlens.js")
+const { CORE_ALLOWED, AGENT_ALLOWED } = await import("../src/tools/index.js")
+const { withLock } = await import("../src/lock.js")
 
 let pass = 0
 let fail = 0
@@ -906,6 +909,104 @@ try {
 } catch {
 	ok("clearQueue khong throw khi file khong ton tai", false)
 }
+
+// —— Startup replay cua pending queue (P0 #2) ——
+console.log("\nstartup replay pending queue")
+const replayRepoObj = { name: "demo", root: rw, write: true, branchPrefix: "*", reindex: ["echo", "reindexed"], toolchain: "npm", source: "config" } as any
+
+clearQueue(qRoot)
+enqueueFiles(qRoot, ["src/replay_a.ts", "src/replay_b.ts"])
+ok("queue co 2 file truoc khi replay", queueDepth(qRoot) === 2)
+
+await replayPendingQueues([replayRepoObj])
+const depthAfterReplay = queueDepth(qRoot)
+ok(
+	"replayPendingQueues hoac xoa queue khi FlowLens xac nhan generation, hoac giu nguyen khi FlowLens khong co san — khong bao gio mat mot phan du lieu",
+	depthAfterReplay === 0 || depthAfterReplay === 2,
+	`depthAfterReplay=${depthAfterReplay}`,
+)
+
+clearQueue(qRoot)
+await replayPendingQueues([replayRepoObj])
+ok("replayPendingQueues khong throw va khong lam gi khi queue rong", queueDepth(qRoot) === 0)
+
+// —— FlowLens probe / version handshake ——
+console.log("\nflowlens probe")
+const probe1 = await probeFlowLens()
+if (probe1.available) {
+	ok("probeFlowLens tra version hop le khi FlowLens co san", /^\d+\.\d+\.\d+/.test(probe1.version), JSON.stringify(probe1))
+	ok("probeFlowLens tra protocolVersion la so", typeof probe1.protocolVersion === "number", JSON.stringify(probe1))
+	ok("probeFlowLens tra danh sach capabilities khong rong", Array.isArray(probe1.capabilities) && probe1.capabilities.length > 0, JSON.stringify(probe1))
+} else {
+	const validCodes = ["cli_missing", "timeout", "parse_error", "crash", "output_truncated", "validation_error", "version_mismatch"]
+	ok("probeFlowLens tra errorCode hop le khi FlowLens khong co san", validCodes.includes(probe1.errorCode), JSON.stringify(probe1))
+	ok("probeFlowLens tra thong bao loi khi khong co san", typeof probe1.error === "string" && probe1.error.length > 0, JSON.stringify(probe1))
+}
+const probe2 = await probeFlowLens()
+ok("probeFlowLens cache ket qua on dinh giua 2 lan goi", probe2.available === probe1.available, JSON.stringify({ probe1, probe2 }))
+
+// —— kill_job phai dung CA process tree, khong chi tien trinh con truc tiep ——
+console.log("\nkill_job process tree")
+const heartbeatPath = join(rw, "heartbeat.txt")
+writeFileSync(
+	join(rw, "heartbeat_parent.js"),
+	[
+		"const { spawn } = require('node:child_process')",
+		"const path = require('node:path')",
+		"const heartbeatPath = path.join(__dirname, 'heartbeat.txt')",
+		"spawn(process.execPath, ['-e', `const fs=require('node:fs');setInterval(()=>{try{fs.appendFileSync(${JSON.stringify(heartbeatPath)},'x')}catch(e){}},50)`], { stdio: 'ignore' })",
+		"setInterval(() => {}, 1000)",
+	].join("\n") + "\n",
+)
+
+const treeJob: any = await terminal({ repo: "demo", command: "node heartbeat_parent.js", background: true })
+ok("khoi dong duoc job cha se spawn tien trinh chau", typeof treeJob.job_id === "string", JSON.stringify(treeJob))
+
+function readHeartbeat(): string {
+	try { return readFileSync(heartbeatPath, "utf8") } catch { return "" }
+}
+
+let grandchildStarted = false
+for (let i = 0; i < 100 && !grandchildStarted; i++) {
+	await sleep(30)
+	grandchildStarted = readHeartbeat().length > 0
+}
+ok("tien trinh chau (grandchild) da bat dau ghi heartbeat", grandchildStarted, `heartbeat len=${readHeartbeat().length}`)
+
+const treeKill = await killJob({ repo: "demo", job_id: treeJob.job_id })
+ok("kill_job bao da kill duoc tien trinh", treeKill.killed === true, JSON.stringify(treeKill))
+
+await sleep(500)
+const lenAfterKill = readHeartbeat().length
+await sleep(800)
+const lenLater = readHeartbeat().length
+ok(
+	"kill_job dung CA tien trinh chau (grandchild), khong de mo coi tiep tuc chay ngam",
+	lenLater === lenAfterKill,
+	`lenAfterKill=${lenAfterKill}, lenLater=${lenLater}`,
+)
+
+// —— Hai request dong thoi sua CUNG MOT FILE (dung lock/lease nhu reg() ap dung that) ——
+console.log("\nconcurrent same-file edits")
+await createFile({ repo: "demo", path: "src/concurrent_target.ts", content: "const x = 1\nconst y = 1\n" })
+const [concEditA, concEditB] = await Promise.all([
+	withLock(rw, "edit_file", () => editFile({ repo: "demo", path: "src/concurrent_target.ts", old_str: "const x = 1", new_str: "const x = 2" })),
+	withLock(rw, "edit_file", () => editFile({ repo: "demo", path: "src/concurrent_target.ts", old_str: "const y = 1", new_str: "const y = 2" })),
+])
+ok("ca 2 edit_file dong thoi (qua withLock nhu reg() dung that) deu thanh cong", (concEditA as any).changed === true && (concEditB as any).changed === true, JSON.stringify({ concEditA, concEditB }))
+const concurrentText = (await readFile({ repo: "demo", path: "src/concurrent_target.ts" })).text
+ok(
+	"khong mat update khi 2 request sua cung 1 file cung luc: lock serialize dung thu tu, ca hai thay doi deu duoc giu",
+	concurrentText.includes("x = 2") && concurrentText.includes("y = 2"),
+	concurrentText,
+)
+
+// —— Snapshot danh sach tool theo tung agent profile (CORE_ALLOWED / AGENT_ALLOWED) ——
+console.log("\ntool profile snapshot")
+ok("CORE_ALLOWED co cac tool doc/ghi/build co ban", ["read_file", "edit_file", "create_file", "git_commit", "run_tests", "health_check", "readiness_check", "get_metrics"].every((t) => CORE_ALLOWED.has(t)), JSON.stringify([...CORE_ALLOWED]))
+ok("CORE_ALLOWED KHONG co cac tool nguy hiem/mo rong (terminal, apply_patch, move/remove, git_push, gh_pr, kill_job)", ["terminal", "terminal_start", "apply_patch", "move_file", "remove_file", "git_push", "gh_pr", "kill_job"].every((t) => !CORE_ALLOWED.has(t)), JSON.stringify([...CORE_ALLOWED]))
+ok("AGENT_ALLOWED co cac tool composite/read-only chinh cho autofill agent", ["list_repos", "repo_overview", "apply_patch", "run_typecheck", "run_tests", "git_status"].every((t) => AGENT_ALLOWED.has(t)), JSON.stringify([...AGENT_ALLOWED]))
+ok("AGENT_ALLOWED KHONG co cac tool doc/ghi file truc tiep hay terminal/kill_job", ["read_file", "edit_file", "create_file", "git_commit", "terminal", "kill_job"].every((t) => !AGENT_ALLOWED.has(t)), JSON.stringify([...AGENT_ALLOWED]))
 
 // —— Cau hinh sai phai sap ngay, khong duoc chay tiep ——
 console.log("\ncau hinh sai")

@@ -65,7 +65,7 @@ function lockKey(args: any): string {
 	}
 }
 
-const CORE_ALLOWED = new Set([
+export const CORE_ALLOWED = new Set([
 	"list_repos", "read_file", "read_many_files", "list_dir", "glob_files", "ripgrep",
 	"edit_file", "multi_edit_file", "create_file", "run_build", "run_tests", "run_lint",
 	"run_typecheck", "job_status", "git_status", "git_diff", "git_log", "git_branch",
@@ -75,7 +75,7 @@ const CORE_ALLOWED = new Set([
 	"what_breaks", "search_code", "prepare_change", "can_edit", "verify_change",
 	"health_check", "readiness_check", "get_metrics",
 ])
-const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status", "search_code", "prepare_change", "can_edit", "verify_change"])
+export const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status", "search_code", "prepare_change", "can_edit", "verify_change"])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
 	if (TOOL_PROFILE === "safe" && (opts.destructive || opts.openWorld || name === "git_push")) return
