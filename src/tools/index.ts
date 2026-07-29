@@ -41,6 +41,7 @@ import {
 	terminalRead, terminalReadSchema,
 	terminalResize, terminalResizeSchema,
 	terminalStart, terminalStartSchema,
+	terminalWaitFor, terminalWaitForSchema,
 	terminalWrite, terminalWriteSchema,
 } from "./pty.js"
 
@@ -65,7 +66,7 @@ const CORE_ALLOWED = new Set([
 	"list_repos", "read_file", "read_many_files", "list_dir", "glob_files", "ripgrep",
 	"edit_file", "multi_edit_file", "create_file", "run_build", "run_tests", "run_lint",
 	"run_typecheck", "job_status", "git_status", "git_diff", "git_log", "git_branch",
-	"git_commit", "reindex",
+	"git_commit", "reindex", "terminal_wait_for",
 	"repo_overview", "inspect_codebase", "read_context", "index_files",
 	"find_symbol", "explain_symbol", "find_references", "trace_flow",
 	"what_breaks",
@@ -153,7 +154,8 @@ export function registerAll(s: McpServer) {
 	reg(s, "terminal", "Chay lenh terminal theo chuoi command qua shell cua OS.", terminalSchema, terminal, { destructive: true, openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_start", "Mo interactive PTY session. Bo command de mo shell; session ton tai qua nhieu MCP calls.", terminalStartSchema, terminalStart, { destructive: true, openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_write", "Gui raw input vao PTY session (\\r=Enter, \\x03=Ctrl+C).", terminalWriteSchema, terminalWrite, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_read", "Doc output PTY tang dan bang byte cursor, khong lap lai output cu.", terminalReadSchema, terminalRead, { readOnly: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_read", "Doc output PTY tang dan bang byte cursor, khong lap lai output cu. Ho tro wait_ms long-poll va mode=text de strip ANSI.", terminalReadSchema, terminalRead, { readOnly: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_wait_for", "Cho chuoi/regex xuat hien trong PTY output (long-poll trong 1 call). Thay the polling loop thu cong.", terminalWaitForSchema, terminalWaitFor, { readOnly: true, openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_resize", "Doi kich thuoc PTY/ConPTY session.", terminalResizeSchema, terminalResize, { openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_close", "Dong va kill PTY session.", terminalCloseSchema, terminalClose, { destructive: true, openWorld: true, managesOwnLease: true })
 	reg(s, "terminal_list", "Liet ke PTY sessions va trang thai, khong tra command/input raw.", terminalListSchema, terminalList, { readOnly: true, openWorld: true, managesOwnLease: true })

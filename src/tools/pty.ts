@@ -14,10 +14,13 @@ import {
 	closePtySession,
 	listPtySessions,
 	readPtySession,
+	readPtySessionWait,
 	resizePtySession,
 	startPtySession,
+	waitForPtyPattern,
 	waitForPtySession,
 	writePtySession,
+	type AnsiMode,
 } from "../ptySessions.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolveDir } from "../security/paths.js"
@@ -94,12 +97,49 @@ export const terminalReadSchema = {
 	session_id: z.string().min(1),
 	cursor: z.number().int().min(0).optional().describe("Byte cursor tu lan doc truoc; bo trong de doc tu dau buffer hien co"),
 	max_bytes: z.number().int().min(1).max(PTY_READ_MAX_BYTES).optional(),
+	wait_ms: z.number().int().min(0).max(60_000).optional().describe("Long-poll: cho toi da wait_ms ms neu chua co output moi tai cursor; giup tranh polling vong lap"),
+	mode: z.enum(["raw", "text"]).optional().describe("raw=giu ANSI escape sequences (mac dinh); text=strip ANSI tra plain text"),
 }
-export async function terminalRead(a: { repo?: string; session_id: string; cursor?: number; max_bytes?: number }) {
+export async function terminalRead(a: { repo?: string; session_id: string; cursor?: number; max_bytes?: number; wait_ms?: number; mode?: AnsiMode }) {
 	assertPtyEnabled()
 	const repo = resolveRepo(a.repo)
 	assertPtySessionRepo(a.session_id, repo.name)
-	return readPtySession(a.session_id, a.cursor, a.max_bytes)
+	if (a.wait_ms && a.wait_ms > 0) {
+		return readPtySessionWait(a.session_id, a.cursor, a.max_bytes, a.wait_ms, a.mode ?? "raw")
+	}
+	const result = readPtySession(a.session_id, a.cursor, a.max_bytes)
+	if (a.mode === "text") {
+		const { stripAnsi } = await import("../ptySessions.js")
+		return { ...result, output: stripAnsi(result.output) }
+	}
+	return result
+}
+
+export const terminalWaitForSchema = {
+	repo: z.string().optional().describe("Ten repo cua PTY session"),
+	session_id: z.string().min(1),
+	pattern: z.string().min(1).describe("Chuoi hoac regex (dang /pattern/flags) can cho xuat hien trong output"),
+	cursor: z.number().int().min(0).optional().describe("Byte cursor bat dau tim; bo trong de tim tu dau buffer"),
+	timeout_ms: z.number().int().min(100).max(120_000).optional().describe("Timeout ms; mac dinh 30000"),
+	max_buffer_bytes: z.number().int().min(1).max(PTY_READ_MAX_BYTES).optional().describe("Gioi han byte output tra ve; mac dinh 100000"),
+	mode: z.enum(["raw", "text"]).optional().describe("raw=giu ANSI (mac dinh); text=strip ANSI truoc khi match"),
+}
+export async function terminalWaitFor(a: { repo?: string; session_id: string; pattern: string; cursor?: number; timeout_ms?: number; max_buffer_bytes?: number; mode?: AnsiMode }) {
+	assertPtyEnabled()
+	const repo = resolveRepo(a.repo)
+	assertPtySessionRepo(a.session_id, repo.name)
+	// Parse pattern: /regex/flags or literal string
+	let pattern: string | RegExp = a.pattern
+	const rxMatch = a.pattern.match(/^\/(.+)\/([gimsuy]*)$/)
+	if (rxMatch) {
+		try { pattern = new RegExp(rxMatch[1]!, rxMatch[2]) } catch { /* keep as string if invalid regex */ }
+	}
+	return waitForPtyPattern(a.session_id, pattern, {
+		cursor: a.cursor,
+		timeoutMs: a.timeout_ms,
+		maxBufferBytes: a.max_buffer_bytes,
+		mode: a.mode ?? "raw",
+	})
 }
 
 export const terminalResizeSchema = {
