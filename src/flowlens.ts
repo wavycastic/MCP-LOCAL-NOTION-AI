@@ -6,9 +6,9 @@ import type { Repo } from "./repos.js";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
-type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks";
+type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks" | "search-code" | "prepare-change" | "can-edit" | "verify-change";
 
-export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number; outputMode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; maxContextTokens?: number; maxFiles?: number; maxSymbols?: number; maxGraphDepth?: number; maxOutputBytes?: number } = {}) {
+export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number; outputMode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; maxContextTokens?: number; maxFiles?: number; maxSymbols?: number; maxGraphDepth?: number; maxOutputBytes?: number; maxPaths?: number; intent?: string; channels?: string; expandGraph?: boolean; planPath?: string; plannedChange?: string; files?: string[]; targets?: string[]; diffScope?: string; outputVersion?: number } = {}) {
   const cli = resolveFlowLensCli();
   if (!cli) return { available: false, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
   const argv = [process.execPath, cli, command];
@@ -19,6 +19,7 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (files.length > 0) argv.push("--changed-file", ...files);
   } else {
     if (command === "inspect-codebase") argv.push(options.query ?? "");
+    if (command === "search-code") argv.push(options.intent ?? "");
     if (command === "find-symbol" || command === "find-references" || command === "explain-symbol-lsp") argv.push(options.symbol ?? "");
     if (command === "trace-flow") argv.push(options.from ?? "");
     if (command === "what-breaks") argv.push(options.target ?? "");
@@ -38,10 +39,38 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (command === "what-breaks" && options.maxDepth) argv.push("--max-depth", String(options.maxDepth));
     if (command === "what-breaks" && options.includeTests) argv.push("--include-tests");
     if ((command === "repo-overview" || command === "inspect-codebase") && options.outputMode) argv.push("--output-mode", options.outputMode);
-    if ((command === "repo-overview" || command === "inspect-codebase") && options.budget) argv.push("--budget", options.budget);
-    for (const [flag, value] of [["--max-context-tokens", options.maxContextTokens], ["--max-files", options.maxFiles], ["--max-symbols", options.maxSymbols], ["--max-graph-depth", options.maxGraphDepth], ["--max-output-bytes", options.maxOutputBytes]] as const) {
-      if ((command === "repo-overview" || command === "inspect-codebase") && value !== undefined) argv.push(flag, String(value));
-    }
+    const budgetCommands = new Set(["repo-overview", "inspect-codebase", "search-code", "prepare-change", "can-edit", "verify-change", "what-breaks"] as FlowLensCommand[]);
+    if (budgetCommands.has(command) && options.budget) argv.push("--budget", options.budget);
+    if (budgetCommands.has(command) && options.maxContextTokens !== undefined) argv.push("--max-context-tokens", String(options.maxContextTokens));
+    const uxLimitCommands = new Set(["repo-overview", "inspect-codebase", "prepare-change", "can-edit"] as FlowLensCommand[]);
+    if (uxLimitCommands.has(command) && options.maxFiles !== undefined) argv.push("--max-files", String(options.maxFiles));
+    if (uxLimitCommands.has(command) && options.maxSymbols !== undefined) argv.push("--max-symbols", String(options.maxSymbols));
+    if (uxLimitCommands.has(command) && options.maxGraphDepth !== undefined) argv.push("--max-graph-depth", String(options.maxGraphDepth));
+    if (command === "repo-overview" && options.maxOutputBytes !== undefined) argv.push("--max-output-bytes", String(options.maxOutputBytes));
+    if ((command === "prepare-change" || command === "can-edit") && options.maxPaths !== undefined) argv.push("--max-paths", String(options.maxPaths));
+    // search-code
+    if (command === "search-code" && options.channels) argv.push("--channels", options.channels);
+    if (command === "search-code" && options.expandGraph) argv.push("--expand-graph");
+    if (command === "search-code" && options.limit) argv.push("--limit", String(options.limit));
+    // prepare-change / can-edit positional intent & file
+    if ((command === "prepare-change" || command === "can-edit") && options.includeTests) argv.push("--include-tests");
+    if ((command === "prepare-change" || command === "can-edit") && options.symbol) argv.push("--symbol", options.symbol);
+    // can-edit specific
+    if (command === "can-edit" && options.file) argv.push("--file", options.file);
+    if (command === "can-edit" && options.planPath) argv.push("--plan", options.planPath);
+    if (command === "can-edit" && options.plannedChange) argv.push("--planned-change", options.plannedChange);
+    // verify-change
+    if (command === "verify-change" && options.files && options.files.length > 0) argv.push("--files", ...options.files);
+    if (command === "verify-change" && options.targets && options.targets.length > 0) argv.push("--targets", ...options.targets);
+    if (command === "verify-change" && options.planPath) argv.push("--plan", options.planPath);
+    if (command === "verify-change" && options.diffScope) argv.push("--diff-scope", options.diffScope);
+    if (command === "verify-change" && options.includeTests) argv.push("--include-tests");
+    // outputVersion for prepare-change, can-edit (no), verify-change
+    if ((command === "prepare-change" || command === "verify-change") && options.outputVersion !== undefined) argv.push("--output-version", String(options.outputVersion));
+    // prepare-change file hint
+    if (command === "prepare-change" && options.file) argv.push("--file", options.file);
+    // intent positional (MUST be last before --json for prepare-change, can-edit)
+    if ((command === "prepare-change" || command === "can-edit") && options.intent) argv.push(options.intent);
   }
   argv.push("--json");
   const result = await run(argv, { cwd: repo.root, timeoutMs: 120_000, maxOutputBytes: 2_000_000 });
