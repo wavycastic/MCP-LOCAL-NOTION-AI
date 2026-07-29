@@ -1,8 +1,36 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./exec.js";
 import type { Repo } from "./repos.js";
+
+// ---------------------------------------------------------------------------
+// Sidecar probe (simplified — full version in P1 #8 branch)
+// ---------------------------------------------------------------------------
+
+export type FlowLensProbeResult =
+  | { available: true; version: string; protocolVersion: number; capabilities: string[]; cliPath: string }
+  | { available: false; error: string };
+
+const _probeCache = new Map<string, FlowLensProbeResult>();
+
+export async function probeFlowLens(): Promise<FlowLensProbeResult> {
+  const cli = resolveFlowLensCli();
+  if (!cli) return { available: false, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
+  const cached = _probeCache.get(cli);
+  if (cached) return cached;
+  let version = "0.0.0";
+  try {
+    const pkgPath = resolve(dirname(cli), "..", "..", "package.json");
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
+      if (typeof pkg.version === "string" && pkg.version) version = pkg.version;
+    }
+  } catch { /* fallthrough */ }
+  const result: FlowLensProbeResult = { available: true, version, protocolVersion: 1, capabilities: ["code-search", "index-files"], cliPath: cli };
+  _probeCache.set(cli, result);
+  return result;
+}
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
