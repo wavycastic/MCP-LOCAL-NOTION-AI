@@ -77,7 +77,7 @@ o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
 Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 `repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
 
-## 28 tool
+## 34 tool
 
 | Tool | Viec |
 | --- | --- |
@@ -103,6 +103,9 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `git_push` | Mac dinh bi tat (`ALLOW_PUSH`) |
 | `gh_pr` | Quan ly GitHub Pull Request qua GitHub CLI (`gh pr status`, `create`, `list`, `view`) |
 | `terminal` | Chay lenh shell (env sanitized, non-login shell, openWorld annotated, job lease lock) |
+| `terminal_start` | Mo interactive PTY/ConPTY session; bo `command` de mo shell lau dai |
+| `terminal_write` / `terminal_read` | Gui raw input va doc output tang dan bang byte cursor, khong lap output cu |
+| `terminal_resize` / `terminal_close` / `terminal_list` | Resize, dong va liet ke PTY sessions |
 | `reindex` | Chay lai index code graph thu cong |
 
 ## Rao an toan & Terminal Hardening
@@ -115,6 +118,11 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
   - Non-login shell defaults (`sh -c` thay vì `sh -lc`) tranh load secret profile.
   - Mark tool annotations `{ destructive: true, openWorld: true }`.
   - Process-tree termination qua `killTree` (Windows `taskkill /T`).
+- **Interactive PTY/ConPTY**:
+  - Session ton tai qua nhieu MCP calls; ho tro REPL, debugger va CLI hoi dap.
+  - Ring buffer gioi han, byte cursor, incremental read, resize va raw control input (`\\r`, `\\x03`).
+  - Gioi han session, idle timeout, lifetime timeout; dong tat ca PTY khi server shutdown.
+  - PTY ke thua quyen cua process server. Neu server chay elevated thi PTY cung chay elevated.
 - **Repo Lease Locks**: Jobs background giu repo lock lease cho toi khi hoan tat; cancelJob giai phong lease an toan.
 - **`audit.log`**: redact noi dung file, patch text, command strings, va `env` object keys.
 
@@ -152,6 +160,12 @@ npx tsx scripts/benchmark-tools.ts
 | `TERMINAL_MODE` | `full` |
 | `TERMINAL_MAX_COMMAND_CHARS` | `20000` |
 | `TERMINAL_INHERIT_SECRETS` | `false` |
+| `PTY_MAX_SESSIONS` | `8` |
+| `PTY_BUFFER_BYTES` | `1000000` |
+| `PTY_READ_MAX_BYTES` | `100000` |
+| `PTY_MAX_INPUT_CHARS` | `100000` |
+| `PTY_IDLE_TIMEOUT_MS` | `1800000` (30 phut) |
+| `PTY_MAX_LIFETIME_MS` | `14400000` (4 gio) |
 | `MAX_READ_BYTES` | `2000000` |
 | `MAX_WRITE_BYTES` | `1000000` |
 | `LOCK_WAIT_MS` | `120000` |

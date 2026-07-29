@@ -135,6 +135,14 @@ export const TERMINAL_MAX_COMMAND_CHARS = Number(process.env.TERMINAL_MAX_COMMAN
 export const TERMINAL_MAX_OUTPUT_BYTES = Number(process.env.TERMINAL_MAX_OUTPUT_BYTES ?? 200_000)
 export const TERMINAL_INHERIT_SECRETS = bool("TERMINAL_INHERIT_SECRETS", false)
 
+/** Interactive PTY session limits. PTY inherits the server process privileges. */
+export const PTY_MAX_SESSIONS = Number(process.env.PTY_MAX_SESSIONS ?? 8)
+export const PTY_BUFFER_BYTES = Number(process.env.PTY_BUFFER_BYTES ?? 1_000_000)
+export const PTY_READ_MAX_BYTES = Number(process.env.PTY_READ_MAX_BYTES ?? 100_000)
+export const PTY_MAX_INPUT_CHARS = Number(process.env.PTY_MAX_INPUT_CHARS ?? 100_000)
+export const PTY_IDLE_TIMEOUT_MS = Number(process.env.PTY_IDLE_TIMEOUT_MS ?? 30 * 60_000)
+export const PTY_MAX_LIFETIME_MS = Number(process.env.PTY_MAX_LIFETIME_MS ?? 4 * 60 * 60_000)
+
 export type ToolProfile = "core" | "safe" | "full"
 const rawProfile = (process.env.TOOL_PROFILE ?? "full").toLowerCase()
 export const TOOL_PROFILE: ToolProfile =

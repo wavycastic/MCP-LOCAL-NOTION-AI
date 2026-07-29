@@ -33,6 +33,14 @@ import { runBuild, runBuildSchema, runTests, runTestsSchema } from "./runTests.j
 import { runLint, runLintSchema } from "./runLint.js"
 import { runTypecheck, runTypecheckSchema } from "./runTypecheck.js"
 import { terminal, terminalSchema } from "./terminal.js"
+import {
+	terminalClose, terminalCloseSchema,
+	terminalList, terminalListSchema,
+	terminalRead, terminalReadSchema,
+	terminalResize, terminalResizeSchema,
+	terminalStart, terminalStartSchema,
+	terminalWrite, terminalWriteSchema,
+} from "./pty.js"
 
 type Handler = (args: any) => Promise<unknown>
 type Opts = {
@@ -122,5 +130,11 @@ export function registerAll(s: McpServer) {
 	reg(s, "git_push", "Push branch hien tai len remote, khong force.", gitPushSchema, gitPush)
 	reg(s, "gh_pr", "Quan ly GitHub Pull Request qua GitHub CLI.", ghPrSchema, ghPr)
 	reg(s, "terminal", "Chay lenh terminal theo chuoi command qua shell cua OS.", terminalSchema, terminal, { destructive: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_start", "Mo interactive PTY session. Bo command de mo shell; session ton tai qua nhieu MCP calls.", terminalStartSchema, terminalStart, { destructive: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_write", "Gui raw input vao PTY session (\\r=Enter, \\x03=Ctrl+C).", terminalWriteSchema, terminalWrite, { destructive: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_read", "Doc output PTY tang dan bang byte cursor, khong lap lai output cu.", terminalReadSchema, terminalRead, { readOnly: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_resize", "Doi kich thuoc PTY/ConPTY session.", terminalResizeSchema, terminalResize, { openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_close", "Dong va kill PTY session.", terminalCloseSchema, terminalClose, { destructive: true, openWorld: true, managesOwnLease: true })
+	reg(s, "terminal_list", "Liet ke PTY sessions va trang thai, khong tra command/input raw.", terminalListSchema, terminalList, { readOnly: true, openWorld: true, managesOwnLease: true })
 	reg(s, "reindex", "Chay lai lenh index code graph cua repo.", reindexSchema, reindex)
 }

@@ -5,7 +5,7 @@ const MAX_BYTES = 5_000_000 // rotate 1 vong: audit.log -> audit.log.1
 const MAX_STRING = 200 // do dai toi da cho moi truong string
 
 /** Truong luon chua noi dung file hoac lenh dai/secret, khong bao gio duoc ghi nguyen van. */
-const ALWAYS_ELIDE = new Set(["content", "new_str", "old_str", "command", "patch_text"])
+const ALWAYS_ELIDE = new Set(["content", "new_str", "old_str", "command", "patch_text", "data"])
 
 export function redactForAudit(args: unknown): unknown {
 	if (args === null || typeof args !== "object" || Array.isArray(args)) return args
