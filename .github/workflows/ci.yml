@@ -7,17 +7,26 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    name: verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # 22 la phien ban Node production duoc pin (xem .nvmrc / package.json engines).
+        node-version: [22]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
 
       # npm ci khi da co lockfile (cai dat tai lap duoc), npm install khi chua.
       # Chay `npm install` mot lan tren may roi commit package-lock.json de CI
       # khong con phu thuoc vao phien ban duoc resolve o thoi diem chay.
       - name: install
+        shell: bash
         run: |
           if [ -f package-lock.json ]; then
             npm ci
@@ -31,3 +40,46 @@ jobs:
 
       - name: smoke test
         run: npm run smoke
+
+  clean-install:
+    name: Clean install (no cache, pinned Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Verify Node satisfies pinned production engine
+        run: node -e "console.log('node', process.version, 'engines.node', require('./package.json').engines.node)"
+
+      - name: Clean install from lockfile
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: smoke test
+        run: npm run smoke
+
+  pty-repeat-stress:
+    name: PTY/concurrency repeat x5 (${{ matrix.os }}, flaky detection)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run smoke suite 5x to catch PTY/concurrency flakiness
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "=== Run $i/5 ==="
+            npm run smoke
+          done
