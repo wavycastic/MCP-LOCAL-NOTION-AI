@@ -3,6 +3,27 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./exec.js";
 import type { Repo } from "./repos.js";
+import { clearQueue, enqueueFiles, peekQueue, queueDepth } from "./pendingQueue.js";
+
+/** Replay pending queues for all repos on server startup. Fire-and-forget. */
+export async function replayPendingQueues(repos: Repo[]): Promise<void> {
+  for (const repo of repos) {
+    const pending = peekQueue(repo.root);
+    if (pending.length === 0) continue;
+    console.log(`[pendingQueue] replaying ${pending.length} pending files for "${repo.name}"`);
+    try {
+      const result = await runFlowLens(repo, "index-files", { changedFiles: pending });
+      if (result && typeof result === "object" && "generation" in result && result.generation != null) {
+        clearQueue(repo.root);
+        console.log(`[pendingQueue] replay done for "${repo.name}" (generation=${result.generation})`);
+      } else {
+        console.warn(`[pendingQueue] replay incomplete for "${repo.name}" — FlowLens did not confirm generation, queue kept`);
+      }
+    } catch (e) {
+      console.warn(`[pendingQueue] replay failed for "${repo.name}":`, e);
+    }
+  }
+}
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
@@ -54,7 +75,23 @@ export async function syncFlowLensAfterTool(repo: Repo, tool: string, output: un
   if (/^(0|false|off|no)$/i.test(process.env.FLOWLENS_AUTO_INDEX ?? "true")) return undefined;
   const changedFiles = changedPaths(tool, output);
   if (changedFiles.length === 0) return undefined;
-  return runFlowLens(repo, "index-files", { changedFiles });
+
+  // Ghi vào queue bền vững TRƯỚC khi gọi FlowLens.
+  // Nếu FlowLens timeout/crash, files vẫn nằm trong queue và sẽ được replay.
+  enqueueFiles(repo.root, changedFiles);
+
+  // Cũng merge bất kỳ file nào đang pending từ lần trước (deduplicated bởi peekQueue).
+  const allPending = peekQueue(repo.root);
+  const result = await runFlowLens(repo, "index-files", { changedFiles: allPending });
+
+  // Chỉ xoá queue khi FlowLens xác nhận generation mới thành công.
+  if (result && typeof result === "object" && "generation" in result && result.generation != null) {
+    clearQueue(repo.root);
+  }
+
+  // Đính kèm changedFilesPending vào kết quả để agent biết trạng thái queue.
+  const pending = queueDepth(repo.root);
+  return { ...result, changedFilesPending: pending };
 }
 
 function changedPaths(tool: string, output: unknown): string[] {
