@@ -4,6 +4,8 @@ import { TOOL_PROFILE } from "../config.js"
 import { withLock } from "../lock.js"
 import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
+import { syncFlowLensAfterTool } from "../flowlens.js"
+import { indexFiles, indexFilesSchema, inspectCodebase, inspectCodebaseSchema, readContext, readContextSchema, repoOverview, repoOverviewSchema } from "./codeUnderstanding.js"
 import { createFile, createFileSchema } from "./createFile.js"
 import { applyPatch, applyPatchSchema } from "./applyPatch.js"
 import { editFile, editFileSchema } from "./editFile.js"
@@ -64,6 +66,7 @@ const CORE_ALLOWED = new Set([
 	"edit_file", "multi_edit_file", "create_file", "run_build", "run_tests", "run_lint",
 	"run_typecheck", "job_status", "git_status", "git_diff", "git_log", "git_branch",
 	"git_commit", "reindex",
+	"repo_overview", "inspect_codebase", "read_context", "index_files",
 ])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
@@ -89,8 +92,13 @@ function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler,
 				const out = readOnly || opts.managesOwnLease
 					? await exec()
 					: await withLock(lockKey(args), name, exec)
+				const repo = readOnly ? undefined : resolveRepo(args?.repo)
+				const flowlensIndex = repo ? await syncFlowLensAfterTool(repo, name, out) : undefined
+				const response = flowlensIndex && out && typeof out === "object"
+					? { ...(out as Record<string, unknown>), flowlens_index: flowlensIndex }
+					: out
 				audit(name, args, true)
-				return { content: [{ type: "text" as const, text: JSON.stringify(out) }] }
+				return { content: [{ type: "text" as const, text: JSON.stringify(response) }] }
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
 				audit(name, args, false, msg)
@@ -107,6 +115,10 @@ export function registerAll(s: McpServer) {
 	reg(s, "list_dir", "Liet ke file/thu muc trong repo. Bo qua .git, node_modules, bin, obj, dist, target, .venv.", listDirSchema, listDir, { readOnly: true })
 	reg(s, "glob_files", "Tim kiem file theo glob patterns (vd: **/*.ts). Tu dong su dung ripgrep hoac git ls-files.", globFilesSchema, globFiles, { readOnly: true })
 	reg(s, "ripgrep", "Tim CHUOI VAN BAN tho bang regex trong mot repo, hoac trong TAT CA repo voi all_repos=true.", ripgrepSchema, ripgrep, { readOnly: true })
+	reg(s, "repo_overview", "Tong quan co cau truc tu FlowLens: stack, module, entry point, API, integration, test, command, critical flow va index freshness.", repoOverviewSchema, repoOverview, { readOnly: true })
+	reg(s, "inspect_codebase", "Composite code understanding: search, symbol/route, graph expansion, rerank va context packing trong mot call.", inspectCodebaseSchema, inspectCodebase, { readOnly: true })
+	reg(s, "read_context", "Doc cac source range, tu gop overlap, giu line, gioi han byte/file, tra SHA va phan bi bo.", readContextSchema, readContext, { readOnly: true })
+	reg(s, "index_files", "Khoi tao hoac cap nhat incremental SQLite FTS5 FlowLens cho repo. Truyen changed_files sau write.", indexFilesSchema, indexFiles)
 	reg(s, "edit_file", "Sua file da ton tai bang string-replace 1 vi tri.", editFileSchema, editFile)
 	reg(s, "multi_edit_file", "Sua NHIEU VI TRI trong 1 file trong 1 LAN GOI DUY NHAT (nguyen tu: all-or-nothing).", multiEditFileSchema, multiEditFile)
 	reg(s, "apply_patch", "Ap dung patch nhieu hunk/file trong mot thao tac duy nhat.", applyPatchSchema, applyPatch, { destructive: true })

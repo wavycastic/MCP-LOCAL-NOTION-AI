@@ -77,7 +77,7 @@ o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
 Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 `repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
 
-## 34 tool
+## 38 tool
 
 | Tool | Viec |
 | --- | --- |
@@ -87,6 +87,10 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `list_dir` | Liet ke thu muc. Bo qua `.git`, `node_modules`, `bin`, `obj`… |
 | `glob_files` | Tim file theo glob; regex/result cache 250ms, tu invalidate sau write; ripgrep/git fallback |
 | `ripgrep` | Tim chuoi/regex. `all_repos: true` de tim xuyen repo |
+| `repo_overview` | Facade FlowLens tra ban do repo va freshness cua persistent index |
+| `inspect_codebase` | Composite retrieval: FTS5/BM25, symbol/route, graph expansion, rerank, context pack |
+| `read_context` | Doc range co merge overlap, line numbers, byte/file budget va content hash |
+| `index_files` | Khoi tao hoac cap nhat changed-file incremental index cua FlowLens |
 | `create_file` | Chi tao file moi, khong ghi de |
 | `edit_file` | Fast matcher (exact -> EOL norm -> trailing WS norm), dung sau match thu 2 khi chi can ambiguity check |
 | `multi_edit_file` | Thay nhieu vi tri nguyen tu; fast branch guard doc truc tiep `.git/HEAD` |
@@ -172,6 +176,8 @@ npx tsx scripts/benchmark-tools.ts
 | `SYNC_WAIT_MS` | `60000` |
 | `EXEC_TIMEOUT_MS` | `900000` |
 | `DEFAULT_REINDEX_CMD` | `npx gitnexus analyze` |
+| `FLOWLENS_AUTO_INDEX` | `true`; tu cap nhat changed files sau write thanh cong |
+| `FLOWLENS_CLI` | tuy chon duong dan `dist/cli/index.js`; mac dinh tim repo FlowLens ke ben |
 
 ## Phat trien
 
