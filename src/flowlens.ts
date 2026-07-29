@@ -6,7 +6,9 @@ import type { Repo } from "./repos.js";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
-export async function runFlowLens(repo: Repo, command: "index-files" | "repo-overview" | "inspect-codebase", options: { changedFiles?: string[]; query?: string; includeTests?: boolean; limit?: number } = {}) {
+type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks";
+
+export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number } = {}) {
   const cli = resolveFlowLensCli();
   if (!cli) return { available: false, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
   const argv = [process.execPath, cli, command];
@@ -17,9 +19,23 @@ export async function runFlowLens(repo: Repo, command: "index-files" | "repo-ove
     if (files.length > 0) argv.push("--changed-file", ...files);
   } else {
     if (command === "inspect-codebase") argv.push(options.query ?? "");
+    if (command === "find-symbol" || command === "find-references" || command === "explain-symbol-lsp") argv.push(options.symbol ?? "");
+    if (command === "trace-flow") argv.push(options.from ?? "");
+    if (command === "what-breaks") argv.push(options.target ?? "");
     argv.push("--project", repo.root);
     if (command === "inspect-codebase" && options.includeTests) argv.push("--include-tests");
     if (command === "inspect-codebase" && options.limit) argv.push("--limit", String(options.limit));
+    if ((command === "find-symbol" || command === "find-references") && options.limit) argv.push("--limit", String(options.limit));
+    if ((command === "find-symbol" || command === "find-references" || command === "explain-symbol-lsp") && options.file) argv.push("--file", options.file);
+    if (command === "explain-symbol-lsp" && options.renameTo) argv.push("--rename-to", options.renameTo);
+    if (command === "explain-symbol-lsp" && options.includeDiagnostics === false) argv.push("--no-diagnostics");
+    if (command === "explain-symbol-lsp" && options.includeCodeActions === false) argv.push("--no-code-actions");
+    if (command === "trace-flow" && options.to) argv.push("--to", options.to);
+    if (command === "trace-flow" && options.maxDepth) argv.push("--max-depth", String(options.maxDepth));
+    if (command === "trace-flow" && options.limit) argv.push("--limit", String(options.limit));
+    if (command === "what-breaks" && options.direction) argv.push("--direction", options.direction);
+    if (command === "what-breaks" && options.maxDepth) argv.push("--max-depth", String(options.maxDepth));
+    if (command === "what-breaks" && options.includeTests) argv.push("--include-tests");
   }
   argv.push("--json");
   const result = await run(argv, { cwd: repo.root, timeoutMs: 120_000, maxOutputBytes: 2_000_000 });
