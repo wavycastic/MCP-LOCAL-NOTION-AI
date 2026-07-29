@@ -41,6 +41,8 @@ type PtyRecord = {
 	done: Promise<void>
 	finish: () => void
 	closeTimer?: NodeJS.Timeout
+	/** Waiters resolved when new data or process exit arrives */
+	waiters: Set<() => void>
 }
 
 const sessions = new Map<string, PtyRecord>()
@@ -73,13 +75,17 @@ function appendOutput(rec: PtyRecord, data: string): void {
 	const incoming = Buffer.from(data, "utf8")
 	rec.buffer = Buffer.concat([rec.buffer, incoming])
 	rec.view.next_cursor += incoming.length
-	if (rec.buffer.length <= PTY_BUFFER_BYTES) return
-
-	let cut = rec.buffer.length - PTY_BUFFER_BYTES
-	while (cut < rec.buffer.length && (rec.buffer[cut]! & 0xc0) === 0x80) cut++
-	rec.buffer = rec.buffer.subarray(cut)
-	rec.view.buffer_base_cursor += cut
-	rec.view.output_truncated = true
+	if (rec.buffer.length > PTY_BUFFER_BYTES) {
+		let cut = rec.buffer.length - PTY_BUFFER_BYTES
+		while (cut < rec.buffer.length && (rec.buffer[cut]! & 0xc0) === 0x80) cut++
+		rec.buffer = rec.buffer.subarray(cut)
+		rec.view.buffer_base_cursor += cut
+		rec.view.output_truncated = true
+	}
+	// Wake all waiters
+	const ws = [...rec.waiters]
+	rec.waiters.clear()
+	for (const w of ws) w()
 }
 
 function viewOf(rec: PtyRecord): PtySessionView {
@@ -121,6 +127,7 @@ export function startPtySession(args: {
 		buffer: Buffer.alloc(0),
 		done,
 		finish,
+		waiters: new Set(),
 		view: {
 			id,
 			repo: args.repo,
@@ -148,6 +155,10 @@ export function startPtySession(args: {
 		rec.view.signal = signal
 		rec.view.ended_at = new Date().toISOString()
 		touch(rec)
+		// Wake waiters on exit
+		const ws = [...rec.waiters]
+		rec.waiters.clear()
+		for (const w of ws) w()
 		rec.finish()
 	})
 	return viewOf(rec)
@@ -181,10 +192,116 @@ export function writePtySession(id: string, data: string): PtySessionView {
 	return viewOf(rec)
 }
 
-export function readPtySession(id: string, cursor?: number, maxBytes?: number) {
+/** Strip ANSI/VT escape sequences from a string */
+export function stripAnsi(text: string): string {
+	// CSI sequences: ESC [ ... final-byte
+	// OSC sequences: ESC ] ... (ST or BEL)
+	// Simple sequences: ESC char
+	return text
+		.replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, "")
+		.replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, "")
+		.replace(/\x1b[^\[\]][\x20-\x2f]*[\x30-\x7e]/g, "")
+		.replace(/\x1b./g, "")
+}
+
+export type AnsiMode = "raw" | "text"
+
+function applyAnsiMode(text: string, mode: AnsiMode): string {
+	return mode === "text" ? stripAnsi(text) : text
+}
+
+/**
+ * Wait up to waitMs for new data at or beyond cursor, then read.
+ * Returns immediately if data is already available or session has exited.
+ */
+export async function readPtySessionWait(
+	id: string,
+	cursor?: number,
+	maxBytes?: number,
+	waitMs?: number,
+	mode: AnsiMode = "raw",
+) {
 	const rec = requireSession(id)
 	touch(rec)
-	const requested = cursor ?? rec.view.buffer_base_cursor
+	const effectiveCursor = cursor ?? rec.view.buffer_base_cursor
+	// Check if data is already available beyond the cursor
+	const hasData = effectiveCursor < rec.view.next_cursor
+	const isFinished = rec.view.status === "exited" || rec.view.status === "closed"
+	if (!hasData && !isFinished && waitMs && waitMs > 0) {
+		const cappedWait = Math.min(waitMs, 60_000)
+		await new Promise<void>((resolve) => {
+			const timer = setTimeout(() => {
+				rec.waiters.delete(resolve)
+				resolve()
+			}, cappedWait)
+			timer.unref()
+			rec.waiters.add(resolve)
+		})
+		touch(rec)
+	}
+	const result = readPtySessionInternal(rec, effectiveCursor, maxBytes)
+	return { ...result, output: applyAnsiMode(result.output, mode) }
+}
+
+/**
+ * Wait for a string/regex pattern to appear in PTY output (starting at cursor),
+ * returning the matched output section, or null if timeout or session exits first.
+ */
+export async function waitForPtyPattern(
+	id: string,
+	pattern: string | RegExp,
+	options: { cursor?: number; timeoutMs?: number; maxBufferBytes?: number; mode?: AnsiMode } = {},
+): Promise<{ matched: true; match: string; output: string; cursor: number; next_cursor: number } | { matched: false; reason: "timeout" | "exited"; output: string; cursor: number; next_cursor: number }> {
+	const rec = requireSession(id)
+	touch(rec)
+	const timeoutMs = Math.min(options.timeoutMs ?? 30_000, 120_000)
+	const mode = options.mode ?? "raw"
+	const startCursor = options.cursor ?? rec.view.buffer_base_cursor
+	const deadline = Date.now() + timeoutMs
+
+	function tryMatch(): { matched: true; match: string; output: string; cursor: number; next_cursor: number } | null {
+		const slice = readPtySessionInternal(rec, startCursor, options.maxBufferBytes)
+		const text = applyAnsiMode(slice.output, mode)
+		const rx = typeof pattern === "string" ? null : pattern
+		const strPat = typeof pattern === "string" ? pattern : null
+		const found = strPat !== null ? text.includes(strPat) : rx!.test(text)
+		if (!found) return null
+		const matchText = strPat !== null ? strPat : (text.match(rx!))?.[0] ?? ""
+		return { matched: true, match: matchText, output: text, cursor: slice.cursor, next_cursor: slice.next_cursor }
+	}
+
+	while (true) {
+		const m = tryMatch()
+		if (m) return m
+		const isFinished = rec.view.status === "exited" || rec.view.status === "closed"
+		if (isFinished) {
+			// One final check after exit
+			const m2 = tryMatch()
+			if (m2) return m2
+			const slice = readPtySessionInternal(rec, startCursor, options.maxBufferBytes)
+			return { matched: false, reason: "exited", output: applyAnsiMode(slice.output, mode), cursor: slice.cursor, next_cursor: slice.next_cursor }
+		}
+		const remaining = deadline - Date.now()
+		if (remaining <= 0) {
+			const slice = readPtySessionInternal(rec, startCursor, options.maxBufferBytes)
+			return { matched: false, reason: "timeout", output: applyAnsiMode(slice.output, mode), cursor: slice.cursor, next_cursor: slice.next_cursor }
+		}
+		// Wait for next data event
+		await new Promise<void>((resolve) => {
+			const wait = Math.min(remaining, 30_000)
+			const timer = setTimeout(() => {
+				rec.waiters.delete(resolve)
+				resolve()
+			}, wait)
+			timer.unref()
+			rec.waiters.add(resolve)
+		})
+		touch(rec)
+	}
+}
+
+function readPtySessionInternal(rec: PtyRecord, cursor: number, maxBytes?: number) {
+	const requested = cursor
 	if (requested > rec.view.next_cursor) {
 		throw new Error(`cursor=${requested} vuot next_cursor=${rec.view.next_cursor}`)
 	}
@@ -209,6 +326,13 @@ export function readPtySession(id: string, cursor?: number, maxBytes?: number) {
 		has_more: nextCursor < rec.view.next_cursor,
 		missed_output: missedOutput,
 	}
+}
+
+export function readPtySession(id: string, cursor?: number, maxBytes?: number) {
+	const rec = requireSession(id)
+	touch(rec)
+	const effectiveCursor = cursor ?? rec.view.buffer_base_cursor
+	return readPtySessionInternal(rec, effectiveCursor, maxBytes)
 }
 
 export function resizePtySession(id: string, cols: number, rows: number): PtySessionView {
