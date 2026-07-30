@@ -69,19 +69,19 @@ go, python, maven).
 
 ### Che do Full Access
 
-`ALLOW_FULL_ACCESS=true` (mac dinh hien tai) them repo ao `system`. Repo nay cho phep
+`ALLOW_FULL_ACCESS=true` them repo ao `system`. Repo nay cho phep
 cac tool file nhan duong dan tuyet doi (`C:\...`, `E:\...`) va cho `terminal` chay
 o bat ky thu muc nao tren may. Day la che do toan quyen, khong bi gioi han boi
 `repos.json`, chroot theo repo hay deny-list duong dan.
 
-Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
-`repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo.
+Mac dinh `ALLOW_FULL_ACCESS=false` (fail-closed) de bao ve an toan, server chi thay repo khai bao trong
+`repos.json`/`WORKSPACE_ROOT` va ap dung day du rao chan theo repo. Dat `ALLOW_FULL_ACCESS=true` neu muon mo toan quyen.
 
 ## Release 4: Agent UX
 
 `repo_overview` va `inspect_codebase` dung cung `repo` name voi execution tools, mac dinh `output_mode: summary`, va ho tro `minimal | summary | full`. Budget `small | medium | large | custom` gioi han token, file, symbol, graph depth va output bytes. Dat `TOOL_PROFILE=agent` de dung registry gon, uu tien cac composite intelligence/edit/verify tools thay vi toan bo primitive.
 
-## 43 tool
+## 53 tool
 
 | Tool | Viec |
 | --- | --- |
@@ -100,6 +100,10 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `explain_symbol` | Hover/type, diagnostics, rename preview, code actions va graph evidence |
 | `trace_flow` | Trace directed execution path hoac bounded downstream flow |
 | `what_breaks` | Blast radius upstream/downstream va related tests tu FlowLens graph |
+| `search_code` | Tim kiem multi-channel (FTS, graph, semantic) trong codebase qua FlowLens |
+| `prepare_change` | Lap ke hoach thay doi: entry point, impact graph, required reads, test scope |
+| `can_edit` | Kiem tra an toan chinh sua file/symbol: risk level, contracts, prerequisites |
+| `verify_change` | Xac nhan thay doi sau edit: diff vs plan, contract risks, verification checks |
 | `create_file` | Chi tao file moi, khong ghi de |
 | `edit_file` | Fast matcher (exact -> EOL norm -> trailing WS norm), dung sau match thu 2 khi chi can ambiguity check |
 | `multi_edit_file` | Thay nhieu vi tri nguyen tu; fast branch guard doc truc tiep `.git/HEAD` |
@@ -118,8 +122,12 @@ Dat `ALLOW_FULL_ACCESS=false` neu muon server chi thay repo khai bao trong
 | `terminal` | Chay lenh shell (env sanitized, non-login shell, openWorld annotated, job lease lock) |
 | `terminal_start` | Mo interactive PTY/ConPTY session; bo `command` de mo shell lau dai |
 | `terminal_write` / `terminal_read` | Gui raw input va doc output tang dan bang byte cursor, khong lap output cu |
+| `terminal_wait_for` | Cho chuoi/regex xuat hien trong PTY output (long-poll trong 1 call) |
 | `terminal_resize` / `terminal_close` / `terminal_list` | Resize, dong va liet ke PTY sessions |
 | `reindex` | Chay lai index code graph thu cong |
+| `health_check` | Kiem tra process con song: uptime, PID, Node version |
+| `readiness_check` | Kiem tra readiness: config, repo registry, git, FlowLens sidecar status |
+| `get_metrics` | Lay metrics: tool call counts, durations, FlowLens sidecar status, PTY sessions |
 
 ## Rao an toan & Terminal Hardening
 
@@ -165,11 +173,11 @@ npx tsx scripts/benchmark-tools.ts
 | `REPOS_CONFIG` | `repos.json` |
 | `WORKSPACE_ROOT` | khong |
 | `AUTO_DISCOVERED_WRITE` | `false` |
-| `ALLOW_FULL_ACCESS` | `true` (them repo toan quyen `system`) |
+| `ALLOW_FULL_ACCESS` | `false` (fail-closed, dat `true` de mo repo `system`) |
 | `DEFAULT_BRANCH_PREFIX` | `agent/` (dat `*` cho moi branch) |
 | `ALLOW_PUSH` | `false` |
 | `GIT_REMOTE` | `origin` |
-| `ALLOW_TERMINAL` | `true` |
+| `ALLOW_TERMINAL` | `false` (kill switch terminal) |
 | `TERMINAL_MODE` | `full` |
 | `TERMINAL_MAX_COMMAND_CHARS` | `20000` |
 | `TERMINAL_INHERIT_SECRETS` | `false` |
@@ -184,6 +192,7 @@ npx tsx scripts/benchmark-tools.ts
 | `LOCK_WAIT_MS` | `120000` |
 | `SYNC_WAIT_MS` | `60000` |
 | `EXEC_TIMEOUT_MS` | `900000` |
+| `TOOL_PROFILE` | `full` (`full`, `agent`, `core`, `safe`) |
 | `DEFAULT_REINDEX_CMD` | `npx gitnexus analyze` |
 | `FLOWLENS_AUTO_INDEX` | `true`; tu cap nhat changed files sau write thanh cong |
 | `FLOWLENS_CLI` | tuy chon duong dan `dist/cli/index.js`; mac dinh tim repo FlowLens ke ben |
