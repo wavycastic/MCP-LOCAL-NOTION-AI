@@ -945,6 +945,22 @@ if (probe1.available) {
 const probe2 = await probeFlowLens()
 ok("probeFlowLens cache ket qua on dinh giua 2 lan goi", probe2.available === probe1.available, JSON.stringify({ probe1, probe2 }))
 
+// —— Direct runFlowLens integration tests (catching CLI option mismatches) ——
+console.log("\nflowlens integration via runFlowLens")
+const { runFlowLens: runFL } = await import("../src/flowlens.js")
+const flRepoObj: any = { name: "demo", root: rw, write: true, branchPrefix: "antigravity/", reindex: ["node"], toolchain: "npm", source: "config" }
+
+const flSearchRes: any = await runFL(flRepoObj, "search-code", { intent: "test query", channels: "semantic", limit: 5 })
+ok("runFlowLens search-code chay thanh cong qua lop MCP", flSearchRes && typeof flSearchRes === "object" && (!flSearchRes.error || !String(flSearchRes.error).includes("unknown option")), JSON.stringify(flSearchRes))
+
+const flWhatBreaksRes: any = await runFL(flRepoObj, "what-breaks", { target: "testTarget", direction: "upstream", maxDepth: 2, includeTests: true })
+ok("runFlowLens what-breaks (--direction + --max-depth) chay thanh cong khong loi unknown option", flWhatBreaksRes && typeof flWhatBreaksRes === "object" && (!flWhatBreaksRes.error || !String(flWhatBreaksRes.error).includes("unknown option")), JSON.stringify(flWhatBreaksRes))
+
+const t0 = Date.now()
+const flWhatBreaksStale: any = await runFL(flRepoObj, "what-breaks", { target: "nonExistentSymbolOrStale", direction: "upstream" })
+const elapsed = Date.now() - t0
+ok("runFlowLens what-breaks phan hoi tuc thi (< 2000ms) khong bi hang/timeout khi index stale", elapsed < 2000, `elapsed=${elapsed}ms`)
+
 // —— kill_job phai dung CA process tree, khong chi tien trinh con truc tiep ——
 console.log("\nkill_job process tree")
 const heartbeatPath = join(rw, "heartbeat.txt")
