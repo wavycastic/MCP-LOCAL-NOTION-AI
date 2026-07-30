@@ -7,7 +7,7 @@
 	<style>
 		:root {
 			color-scheme: dark;
-			font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+			font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, sans-serif;
 		}
 		* { box-sizing: border-box; }
 		
@@ -16,13 +16,13 @@
 			height: 6px;
 		}
 		::-webkit-scrollbar-track { background: transparent; }
-		::-webkit-scrollbar-thumb { background: #333333; border-radius: 3px; }
-		::-webkit-scrollbar-thumb:hover { background: #555555; }
+		::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+		::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
 
 		body {
 			margin: 0;
-			background: #09090b;
-			color: #f4f4f5;
+			background: #202020;
+			color: #ffffff;
 			font-size: 12px;
 			overflow: hidden;
 			height: 100vh;
@@ -31,46 +31,46 @@
 		
 		main {
 			height: 100vh;
-			padding: 10px 12px;
+			padding: 12px 14px;
 			display: flex;
 			flex-direction: column;
-			gap: 8px;
+			gap: 10px;
 			box-sizing: border-box;
 		}
 
-		/* 2 Navigation Tabs */
+		/* WinUI 3 Pivot / Segmented Navigation Tabs */
 		.nav-tabs {
 			display: flex;
-			gap: 6px;
+			gap: 4px;
 			flex-shrink: 0;
-			background: #18181b;
+			background: rgba(0, 0, 0, 0.25);
 			padding: 3px;
-			border-radius: 8px;
-			border: 1px solid #27272a;
+			border-radius: 6px;
+			border: 1px solid rgba(255, 255, 255, 0.06);
 		}
 		.nav-tab {
 			flex: 1;
-			height: 28px;
-			font-size: 11px;
+			height: 30px;
+			font-size: 12px;
 			font-weight: 600;
 			background: transparent;
-			color: #a1a1aa;
+			color: rgba(255, 255, 255, 0.7);
 			border: 0;
-			border-radius: 6px;
+			border-radius: 4px;
 			cursor: pointer;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			transition: all 0.15s ease;
+			transition: all 0.15s cubic-bezier(0.1, 0.9, 0.2, 1);
 		}
 		.nav-tab:hover {
-			color: #f4f4f5;
-			background: #27272a;
+			color: #ffffff;
+			background: rgba(255, 255, 255, 0.05);
 		}
 		.nav-tab.active {
-			background: #2563eb;
+			background: rgba(255, 255, 255, 0.08);
 			color: #ffffff;
-			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+			box-shadow: inset 0 -2px 0 0 #60cdff;
 		}
 
 		.view-container {
@@ -82,29 +82,31 @@
 		.view {
 			display: flex;
 			flex-direction: column;
-			gap: 8px;
+			gap: 10px;
 			height: 100%;
 		}
 		.view.hidden {
 			display: none;
 		}
 
+		/* WinUI 3 Control Card */
 		.card {
-			background: #18181b;
-			border: 1px solid #27272a;
+			background: rgba(255, 255, 255, 0.05);
+			border: 1px solid rgba(255, 255, 255, 0.08);
 			border-radius: 8px;
-			padding: 10px 12px;
+			padding: 12px 14px;
 			min-width: 0;
 			display: flex;
 			flex-direction: column;
-			gap: 6px;
+			gap: 8px;
+			box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 		}
 		h2 {
 			margin: 0 0 2px;
-			font-size: 12px;
-			font-weight: 700;
-			color: #f4f4f5;
-			letter-spacing: 0.3px;
+			font-size: 13px;
+			font-weight: 600;
+			color: #ffffff;
+			letter-spacing: 0.2px;
 			display: flex;
 			align-items: center;
 			gap: 6px;
@@ -112,70 +114,87 @@
 		.form-group {
 			display: flex;
 			flex-direction: column;
-			gap: 3px;
+			gap: 4px;
 		}
 		label {
-			font-size: 10px;
-			color: #a1a1aa;
-			font-weight: 600;
-			letter-spacing: 0.4px;
-			text-transform: uppercase;
+			font-size: 11px;
+			color: rgba(255, 255, 255, 0.7);
+			font-weight: 500;
+			letter-spacing: 0.2px;
 		}
 		.input-group {
 			display: flex;
-			gap: 5px;
+			gap: 6px;
 			align-items: center;
 		}
+		
+		/* WinUI 3 Text Control */
 		input[type="text"],
 		input[type="password"],
 		input:not([type]) {
 			flex: 1;
 			width: 100%;
 			box-sizing: border-box;
-			padding: 4px 8px;
-			height: 28px;
-			border-radius: 6px;
-			border: 1px solid #3f3f46;
-			background: #09090b;
-			color: #f4f4f5;
-			font-size: 11px;
-			font-family: ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
-			transition: border-color 0.15s ease;
+			padding: 5px 10px;
+			height: 30px;
+			border-radius: 4px;
+			border: 1px solid rgba(255, 255, 255, 0.08);
+			border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+			background: rgba(255, 255, 255, 0.04);
+			color: #ffffff;
+			font-size: 11.5px;
+			font-family: "Segoe UI Mono", Consolas, monospace;
+			transition: all 0.15s ease;
+		}
+		input:hover {
+			background: rgba(255, 255, 255, 0.07);
+			border-bottom-color: rgba(255, 255, 255, 0.6);
 		}
 		input:focus {
-			border-color: #3b82f6;
+			background: rgba(0, 0, 0, 0.3);
+			border-color: rgba(255, 255, 255, 0.08);
+			border-bottom: 2px solid #60cdff;
 			outline: none;
-			box-shadow: 0 0 0 1px #3b82f6;
 		}
 		input[readonly] {
-			background: #121215;
-			color: #a1a1aa;
+			background: rgba(0, 0, 0, 0.2);
+			color: rgba(255, 255, 255, 0.6);
 		}
+
+		/* WinUI 3 Button Control */
 		button {
-			border: 0;
-			border-radius: 6px;
-			padding: 4px 10px;
-			height: 28px;
-			color: white;
+			border: 1px solid rgba(255, 255, 255, 0.08);
+			border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+			border-radius: 4px;
+			padding: 4px 12px;
+			height: 30px;
+			background: rgba(255, 255, 255, 0.06);
+			color: #ffffff;
 			cursor: pointer;
-			font-weight: 600;
-			font-size: 11px;
+			font-weight: 500;
+			font-size: 12px;
+			font-family: inherit;
 			white-space: nowrap;
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			transition: all 0.15s ease;
+			transition: all 0.1s cubic-bezier(0.1, 0.9, 0.2, 1);
 		}
+		button:hover {
+			background: rgba(255, 255, 255, 0.09);
+		}
+		button:active {
+			background: rgba(255, 255, 255, 0.03);
+			color: rgba(255, 255, 255, 0.7);
+			transform: scale(0.98);
+		}
+
 		button.secondary {
-			background: #27272a;
-			color: #e4e4e7;
-			border: 1px solid #3f3f46;
-		}
-		button.secondary:hover {
-			background: #3f3f46;
+			background: rgba(255, 255, 255, 0.06);
 			color: #ffffff;
-			border-color: #52525b;
 		}
+
+		/* WinUI 3 Checkbox Control */
 		.checkbox-group {
 			margin-top: 4px;
 		}
@@ -185,19 +204,19 @@
 			gap: 8px;
 			cursor: pointer;
 			text-transform: none;
-			font-size: 11px;
-			color: #e4e4e7;
-			font-weight: 500;
+			font-size: 12px;
+			color: rgba(255, 255, 255, 0.9);
+			font-weight: 400;
 			user-select: none;
 		}
 		.checkbox-label input[type="checkbox"] {
 			appearance: none;
 			-webkit-appearance: none;
-			width: 16px;
-			height: 16px;
-			border: 1px solid #52525b;
+			width: 18px;
+			height: 18px;
+			border: 1px solid rgba(255, 255, 255, 0.4);
 			border-radius: 4px;
-			background-color: #09090b;
+			background-color: rgba(255, 255, 255, 0.04);
 			cursor: pointer;
 			display: inline-flex;
 			align-items: center;
@@ -207,18 +226,18 @@
 			flex-shrink: 0;
 		}
 		.checkbox-label input[type="checkbox"]:hover {
-			border-color: #3b82f6;
-			background-color: #18181b;
+			border-color: rgba(255, 255, 255, 0.7);
+			background-color: rgba(255, 255, 255, 0.08);
 		}
 		.checkbox-label input[type="checkbox"]:checked {
-			background-color: #2563eb;
-			border-color: #2563eb;
+			background-color: #60cdff;
+			border-color: #60cdff;
 		}
 		.checkbox-label input[type="checkbox"]:checked::after {
 			content: "";
-			width: 4px;
-			height: 8px;
-			border: solid #ffffff;
+			width: 5px;
+			height: 9px;
+			border: solid #000000;
 			border-width: 0 2px 2px 0;
 			transform: rotate(45deg);
 			margin-bottom: 2px;
@@ -226,59 +245,58 @@
 		
 		.global-actions {
 			display: flex;
-			gap: 8px;
+			gap: 10px;
 			margin-top: auto;
-			padding-top: 2px;
+			padding-top: 4px;
 		}
 		.global-actions button {
 			flex: 1;
-			height: 32px;
-			font-size: 11px;
+			height: 34px;
+			font-size: 12px;
 			font-weight: 600;
-			background: #27272a;
-			color: #f4f4f5;
-			border: 1px solid #3f3f46;
-			border-radius: 6px;
-		}
-		.global-actions button:hover {
-			background: #3f3f46;
-			border-color: #52525b;
 		}
 		.global-actions button#start-all {
-			background: #15803d;
-			border-color: #166534;
-			color: #ffffff;
+			background: #60cdff;
+			border: 1px solid #60cdff;
+			color: #000000;
 		}
 		.global-actions button#start-all:hover {
-			background: #166534;
+			background: #70d3ff;
+		}
+		.global-actions button#start-all:active {
+			background: #50c7ff;
+			color: rgba(0, 0, 0, 0.8);
 		}
 		.global-actions button#stop-all {
-			background: #be123c;
-			border-color: #9f1239;
-			color: #ffffff;
+			background: rgba(255, 255, 255, 0.06);
+			border: 1px solid rgba(255, 255, 255, 0.1);
+			color: #ff99a4;
 		}
 		.global-actions button#stop-all:hover {
-			background: #9f1239;
+			background: rgba(196, 43, 28, 0.2);
+			border-color: #c42b1c;
+			color: #ffffff;
 		}
 		
+		/* WinUI 3 Terminal Log View */
 		pre#log {
 			margin: 0;
 			flex: 1;
 			overflow-y: auto;
 			white-space: pre-wrap;
 			word-break: break-all;
-			font: 10.5px/1.5 ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
-			background: #09090b;
-			border: 1px solid #27272a;
-			border-radius: 8px;
-			padding: 8px 10px;
-			color: #d4d4d8;
+			font: 11px/1.5 "Segoe UI Mono", Consolas, Monaco, monospace;
+			background: rgba(0, 0, 0, 0.3);
+			border: 1px solid rgba(255, 255, 255, 0.08);
+			border-radius: 6px;
+			padding: 10px 12px;
+			color: #e4e4e7;
 		}
 		.log-line { display: block; margin-bottom: 2px; }
-		.log-time { color: #71717a; font-size: 9.5px; margin-right: 6px; }
-		.log-src-mcp { color: #60a5fa; font-weight: 600; }
+		.log-time { color: rgba(255, 255, 255, 0.4); font-size: 10px; margin-right: 6px; }
+		.log-src-mcp { color: #60cdff; font-weight: 600; }
 		.log-src-gitnexus { color: #c084fc; font-weight: 600; }
-		.log-src-sys { color: #4ade80; font-weight: 600; }
+		.log-src-sys { color: #6ccb5f; font-weight: 600; }
 	</style>
 </head>
 <body>
