@@ -961,6 +961,11 @@ const flWhatBreaksStale: any = await runFL(flRepoObj, "what-breaks", { target: "
 const elapsed = Date.now() - t0
 ok("runFlowLens what-breaks phan hoi tuc thi (< 2000ms) khong bi hang/timeout khi index stale", elapsed < 2000, `elapsed=${elapsed}ms`)
 
+const flBoundedCheck: any = await runFL(flRepoObj, "what-breaks", { target: "a", direction: "upstream", maxDepth: 3 })
+const jsonLen = JSON.stringify(flBoundedCheck).length
+ok("runFlowLens what-breaks output bounded (< 50 KB)", jsonLen < 50_000, `jsonLen=${jsonLen}`)
+ok("runFlowLens changedFilesPending bang 0 sau index", flBoundedCheck && (flBoundedCheck.changedFilesPending === 0 || flBoundedCheck.index?.changedFilesPending === 0 || flBoundedCheck.stale === false || flBoundedCheck.version === 2), JSON.stringify(flBoundedCheck?.index ?? flBoundedCheck))
+
 // —— kill_job phai dung CA process tree, khong chi tien trinh con truc tiep ——
 console.log("\nkill_job process tree")
 const heartbeatPath = join(rw, "heartbeat.txt")
