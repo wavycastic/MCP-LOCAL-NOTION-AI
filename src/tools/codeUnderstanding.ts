@@ -78,8 +78,9 @@ const changeAgentUxSchema = {
 export const searchCodeSchema = {
   repo: z.string().optional().describe("Ten repo (xem list_repos)"),
   query: z.string().min(1).describe("Cau hoi / keyword tim trong codebase"),
-  channels: z.string().optional().describe("Kenh tim kiem, vd: symbol,graph,fts"),
+  channels: z.union([z.string(), z.array(z.string())]).optional().describe("Kenh tim kiem, vd: 'semantic', 'symbol,graph', hoac ['semantic']"),
   expand_graph: z.boolean().optional().describe("Mo rong ket qua qua graph; mac dinh false"),
+  semantic: z.boolean().optional().describe("Bat local semantic search; mac dinh true"),
   limit: z.number().int().min(1).max(100).optional(),
   budget: z.enum(["small", "medium", "large", "custom"]).optional(),
   max_context_tokens: z.number().int().positive().optional(),
@@ -117,9 +118,10 @@ export const verifyChangeSchema = {
   output_version: z.number().int().min(1).optional().describe("8 cho canonical verify-change.v1 envelope"),
 };
 
-export async function searchCode(a: { repo?: string; query: string; channels?: string; expand_graph?: boolean; limit?: number; budget?: "small" | "medium" | "large" | "custom"; max_context_tokens?: number; include_tests?: boolean; output_version?: number }) {
+export async function searchCode(a: { repo?: string; query: string; channels?: string | string[]; expand_graph?: boolean; semantic?: boolean; limit?: number; budget?: "small" | "medium" | "large" | "custom"; max_context_tokens?: number; include_tests?: boolean; output_version?: number }) {
   const repo = resolveRepo(a.repo);
-  return { repo: repo.name, ...(await runFlowLens(repo, "search-code", { intent: a.query, channels: a.channels, expandGraph: a.expand_graph, limit: a.limit, budget: a.budget, maxContextTokens: a.max_context_tokens, includeTests: a.include_tests, outputVersion: a.output_version })) };
+  const channels = Array.isArray(a.channels) ? a.channels.join(",") : a.channels;
+  return { repo: repo.name, ...(await runFlowLens(repo, "search-code", { intent: a.query, channels, expandGraph: a.expand_graph, semantic: a.semantic ?? true, limit: a.limit, budget: a.budget, maxContextTokens: a.max_context_tokens, includeTests: a.include_tests, outputVersion: a.output_version })) };
 }
 
 export async function prepareChange(a: { repo?: string; intent?: string; file?: string; symbol?: string; budget?: "small" | "medium" | "large" | "custom"; max_context_tokens?: number; max_files?: number; max_symbols?: number; max_paths?: number; max_graph_depth?: number; include_tests?: boolean; output_version?: number }) {

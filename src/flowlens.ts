@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./exec.js";
 import type { Repo } from "./repos.js";
@@ -80,6 +80,11 @@ export async function probeFlowLens(): Promise<FlowLensProbeResult> {
   return result;
 }
 
+function nodeExecPath(): string {
+  if ("electron" in process.versions) return "node";
+  return process.execPath;
+}
+
 async function detectFlowLensVersion(cli: string): Promise<string | undefined> {
   // Try reading package.json adjacent to the CLI first (fast, no spawn)
   try {
@@ -91,7 +96,7 @@ async function detectFlowLensVersion(cli: string): Promise<string | undefined> {
   } catch { /* fallthrough */ }
   // Fallback: spawn `node cli.js --version` and parse output
   try {
-    const result = await run([process.execPath, cli, "--version"], { cwd: process.cwd(), timeoutMs: 10_000, maxOutputBytes: 4096 });
+    const result = await run([nodeExecPath(), cli, "--version"], { cwd: process.cwd(), timeoutMs: 10_000, maxOutputBytes: 4096 });
     const raw = (result.stdout + result.stderr).trim();
     const match = raw.match(/\d+\.\d+\.\d+/);
     return match ? match[0] : undefined;
@@ -115,20 +120,24 @@ function inferCapabilities(version: string): string[] {
 // ---------------------------------------------------------------------------
 
 const COMMAND_TIMEOUT_MS: Partial<Record<FlowLensCommand, number>> = {
-  "index-files": 120_000,
-  "repo-overview": 90_000,
-  "inspect-codebase": 90_000,
+  "index-files": 180_000,
+  "repo-overview": 30_000,
+  "inspect-codebase": 45_000,
+  "search-code": 30_000,
+  "prepare-change": 35_000,
+  "can-edit": 30_000,
+  "verify-change": 35_000,
 };
-const DEFAULT_INTELLIGENCE_TIMEOUT_MS = 60_000;
+const DEFAULT_INTELLIGENCE_TIMEOUT_MS = 30_000;
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".py", ".go"]);
 
 type FlowLensCommand = "index-files" | "repo-overview" | "inspect-codebase" | "find-symbol" | "find-references" | "explain-symbol-lsp" | "trace-flow" | "what-breaks" | "search-code" | "prepare-change" | "can-edit" | "verify-change";
 
-export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number; outputMode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; maxContextTokens?: number; maxFiles?: number; maxSymbols?: number; maxGraphDepth?: number; maxOutputBytes?: number; maxPaths?: number; intent?: string; channels?: string; expandGraph?: boolean; planPath?: string; plannedChange?: string; files?: string[]; targets?: string[]; diffScope?: string; outputVersion?: number } = {}) {
+export async function runFlowLens(repo: Repo, command: FlowLensCommand, options: { changedFiles?: string[]; query?: string; symbol?: string; target?: string; file?: string; from?: string; to?: string; direction?: "upstream" | "downstream" | "bidirectional"; renameTo?: string; includeTests?: boolean; semantic?: boolean; includeDiagnostics?: boolean; includeCodeActions?: boolean; maxDepth?: number; limit?: number; outputMode?: "minimal" | "summary" | "full"; budget?: "small" | "medium" | "large" | "custom"; maxContextTokens?: number; maxFiles?: number; maxSymbols?: number; maxGraphDepth?: number; maxOutputBytes?: number; maxPaths?: number; intent?: string; channels?: string; expandGraph?: boolean; planPath?: string; plannedChange?: string; files?: string[]; targets?: string[]; diffScope?: string; outputVersion?: number; group?: string; crossRepo?: boolean; _isRetry?: boolean } = {}) {
   const cli = resolveFlowLensCli();
   if (!cli) return { available: false, stale: true, changedFilesPending: options.changedFiles?.length ?? 0, error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
-  const argv = [process.execPath, cli, command];
+  const argv = [nodeExecPath(), cli, command];
   if (command === "index-files") {
     argv.push(repo.root);
     const files = (options.changedFiles ?? []).filter(isSourceFile);
@@ -169,6 +178,7 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (command === "search-code" && options.channels) argv.push("--channels", options.channels);
     if (command === "search-code" && options.expandGraph) argv.push("--expand-graph");
     if (command === "search-code" && options.limit) argv.push("--limit", String(options.limit));
+    if (command === "search-code" && options.semantic !== false) argv.push("--semantic");
     // prepare-change / can-edit positional intent & file
     if ((command === "prepare-change" || command === "can-edit") && options.includeTests) argv.push("--include-tests");
     if ((command === "prepare-change" || command === "can-edit") && options.symbol) argv.push("--symbol", options.symbol);
@@ -188,6 +198,13 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
     if (command === "prepare-change" && options.file) argv.push("--file", options.file);
     // intent positional (MUST be last before --json for prepare-change, can-edit)
     if ((command === "prepare-change" || command === "can-edit") && options.intent) argv.push(options.intent);
+    // Pass group options only when explicitly requested
+    if (options.group) argv.push("--group", options.group);
+    if (options.crossRepo) {
+      const groupFile = options.group ?? [join(repo.root, "flowlens.group.json"), join(repo.root, ".flowlens", "flowlens.group.json")].find((p) => existsSync(p));
+      if (groupFile && !options.group) argv.push("--group", groupFile);
+      argv.push("--cross-repo");
+    }
   }
   argv.push("--json");
   const timeoutMs = COMMAND_TIMEOUT_MS[command] ?? DEFAULT_INTELLIGENCE_TIMEOUT_MS;
@@ -195,14 +212,39 @@ export async function runFlowLens(repo: Repo, command: FlowLensCommand, options:
   const pending = options.changedFiles?.length ?? 0;
   if (result.timedOut) return { available: true, stale: true, changedFilesPending: pending, errorCode: "timeout" as FlowLensErrorCode, error: `FlowLens command '${command}' timed out after ${timeoutMs / 1000}s` };
   if (result.outputTruncated && result.code !== 0) return { available: true, stale: true, changedFilesPending: pending, errorCode: "output_truncated" as FlowLensErrorCode, error: "FlowLens output exceeded 2 MB limit" };
-  if (result.code !== 0) {
+
+  let parsed: any;
+  try { parsed = JSON.parse(result.stdout); } catch {}
+
+  const rawOutput = (result.stdout + " " + result.stderr).toLowerCase();
+  const isStaleSignal = !options._isRetry && (
+    rawOutput.includes("project_index_stale") ||
+    rawOutput.includes("stalegraph") ||
+    rawOutput.includes("not found in graph index") ||
+    rawOutput.includes("run flowlens analyze") ||
+    (parsed && typeof parsed === "object" && (
+      parsed.stale === true ||
+      (Array.isArray(parsed.redFlags) && parsed.redFlags.includes("staleGraph")) ||
+      (Array.isArray(parsed.warnings) && parsed.warnings.some((w: string) => String(w).toLowerCase().includes("not found in graph index"))) ||
+      parsed.error?.code === "PROJECT_INDEX_STALE" ||
+      parsed.error?.code === "MISSING_PROJECT"
+    ))
+  );
+
+  if (isStaleSignal) {
+    // Non-blocking fire-and-forget background re-indexing
+    runFlowLens(repo, "index-files", { _isRetry: true }).catch((e) => console.warn(`[auto-heal] background index failed for "${repo.name}":`, e));
+  }
+
+  if (result.code !== 0 && !parsed) {
     const raw = result.stderr.trim() || result.stdout.trim() || `FlowLens exited with code ${result.code}`;
     const isValidation = raw.includes("validation") || raw.includes("invalid") || raw.includes("required") || raw.includes("INVALID_");
     const errorCode: FlowLensErrorCode = isValidation ? "validation_error" : "crash";
     return { available: true, stale: true, changedFilesPending: pending, errorCode, error: raw };
   }
-  try { return JSON.parse(result.stdout); }
-  catch { return { available: true, stale: true, changedFilesPending: pending, errorCode: "parse_error" as FlowLensErrorCode, error: "FlowLens returned invalid JSON.", output: result.stdout.slice(-4_000) }; }
+
+  if (parsed) return parsed;
+  return { available: true, stale: true, changedFilesPending: pending, errorCode: "parse_error" as FlowLensErrorCode, error: "FlowLens returned invalid JSON.", output: result.stdout.slice(-4_000) };
 }
 
 export async function syncFlowLensAfterTool(repo: Repo, tool: string, output: unknown) {

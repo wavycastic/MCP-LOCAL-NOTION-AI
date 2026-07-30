@@ -63,6 +63,7 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 		DOTNET_CLI_TELEMETRY_OPTOUT: "1",
 		DOTNET_NOLOGO: "1",
 		GIT_TERMINAL_PROMPT: "0",
+		...(process.env.ELECTRON_RUN_AS_NODE ? { ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE } : {}),
 		...(extraEnv ?? {}),
 	}
 	if (process.env.HOME) env.HOME = process.env.HOME
@@ -101,6 +102,10 @@ export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecre
 }
 
 export function killTree(p: ChildProcess): void {
+	try {
+		p.stdout?.destroy()
+		p.stderr?.destroy()
+	} catch {}
 	if (process.platform === "win32" && p.pid) {
 		try {
 			const k = spawn("taskkill", ["/pid", String(p.pid), "/T", "/F"], { stdio: "ignore" })
@@ -110,7 +115,9 @@ export function killTree(p: ChildProcess): void {
 			// fallthrough
 		}
 	}
-	p.kill("SIGKILL")
+	try {
+		p.kill("SIGKILL")
+	} catch {}
 }
 
 export function run(
@@ -156,7 +163,7 @@ export function run(
 	const maxOutput = Number.isFinite(configuredLimit) ? Math.max(0, Math.floor(configuredLimit)) : MAX_OUTPUT
 
 	return new Promise((res, rej) => {
-		const p = spawn(cmd, args, { cwd: cwd0, shell: false, env: childEnv(opts.env) })
+		const p = spawn(cmd, args, { cwd: cwd0, shell: false, stdio: ["ignore", "pipe", "pipe"], env: childEnv(opts.env) })
 		opts.onSpawn?.(p)
 
 		const outChunks: Buffer[] = []
@@ -164,6 +171,7 @@ export function run(
 		let capturedBytes = 0
 		let outputBytesSeen = 0
 		let timedOut = false
+		let resolved = false
 
 		const capture = (target: Buffer[], data: Buffer | string) => {
 			const buf = Buffer.isBuffer(data) ? data : Buffer.from(data)
@@ -175,19 +183,14 @@ export function run(
 			capturedBytes += part.length
 		}
 
-		const t = setTimeout(() => {
-			timedOut = true
-			killTree(p)
-		}, opts.timeoutMs ?? EXEC_TIMEOUT_MS)
+		let exitCode: number | null = null
+		let exitTimer: NodeJS.Timeout | null = null
 
-		p.stdout.on("data", (d) => capture(outChunks, d))
-		p.stderr.on("data", (d) => capture(errChunks, d))
-		p.on("error", (e) => {
+		const finish = (code: number | null) => {
+			if (resolved) return
+			resolved = true
 			clearTimeout(t)
-			rej(e)
-		})
-		p.on("close", (code) => {
-			clearTimeout(t)
+			if (exitTimer) clearTimeout(exitTimer)
 			res({
 				code,
 				stdout: Buffer.concat(outChunks).toString("utf8"),
@@ -196,6 +199,38 @@ export function run(
 				outputTruncated: outputBytesSeen > capturedBytes,
 				outputBytesSeen,
 			})
+		}
+
+		const t = setTimeout(() => {
+			timedOut = true
+			killTree(p)
+			setTimeout(() => {
+				try { p.stdout?.destroy() } catch {}
+				try { p.stderr?.destroy() } catch {}
+				finish(exitCode ?? -1)
+			}, 1500).unref()
+		}, opts.timeoutMs ?? EXEC_TIMEOUT_MS)
+
+		p.stdout?.on("data", (d) => capture(outChunks, d))
+		p.stderr?.on("data", (d) => capture(errChunks, d))
+		p.on("error", (e) => {
+			if (resolved) return
+			resolved = true
+			clearTimeout(t)
+			if (exitTimer) clearTimeout(exitTimer)
+			rej(e)
+		})
+		p.on("exit", (code) => {
+			if (exitCode === null) exitCode = code
+			exitTimer = setTimeout(() => {
+				try { p.stdout?.destroy() } catch {}
+				try { p.stderr?.destroy() } catch {}
+				finish(exitCode)
+			}, 500)
+			exitTimer.unref()
+		})
+		p.on("close", (code) => {
+			finish(code)
 		})
 	})
 }
