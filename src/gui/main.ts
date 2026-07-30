@@ -259,9 +259,8 @@ function startMcp(env: Record<string, string>) {
 	const envFile = readEnvFile()
 	const mergedEnv: Record<string, string> = {
 		...envFile,
-		...process.env,
+		...(process.env as Record<string, string>),
 		...env,
-		...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
 	}
 
 	if (!mergedEnv.REPOS_CONFIG) {
@@ -272,7 +271,7 @@ function startMcp(env: Record<string, string>) {
 		mergedEnv.FULL_ACCESS_CWD = mergedEnv.WORKSPACE_ROOT || repoRoot()
 	}
 
-	procs.mcp.child = spawn(process.execPath, [entry], {
+	procs.mcp.child = spawn("node", [entry], {
 		cwd: repoRoot(),
 		env: mergedEnv,
 		windowsHide: true,
@@ -293,13 +292,12 @@ function startGitnexus(env: Record<string, string>) {
 	const envFile = readEnvFile()
 	const mergedEnv: Record<string, string> = {
 		...envFile,
-		...process.env,
+		...(process.env as Record<string, string>),
 		...env,
 		AUTH_TOKEN: token,
-		...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
 	}
 
-	procs.gitnexus.child = spawn(process.execPath, [entry, token], {
+	procs.gitnexus.child = spawn("node", [entry, token], {
 		cwd: repoRoot(),
 		env: mergedEnv,
 		windowsHide: true,
