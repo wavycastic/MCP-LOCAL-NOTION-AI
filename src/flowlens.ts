@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ALLOW_FLOWLENS } from "./config.js";
 import { run } from "./exec.js";
 import type { Repo } from "./repos.js";
 import { clearQueue, enqueueFiles, peekQueue, queueDepth } from "./pendingQueue.js";
@@ -54,6 +55,9 @@ const probeCache = new Map<string, FlowLensProbeResult>();
 
 /** Detect capabilities from flowlens CLI (cached per process lifetime). */
 export async function probeFlowLens(): Promise<FlowLensProbeResult> {
+  if (!ALLOW_FLOWLENS) {
+    return { available: false, errorCode: "cli_missing", error: "FlowLens is disabled by ALLOW_FLOWLENS=false setting." };
+  }
   const cli = resolveFlowLensCli();
   if (!cli) {
     return { available: false, errorCode: "cli_missing", error: "FlowLens CLI not found. Set FLOWLENS_CLI or build the sibling flowlens repository." };
@@ -286,6 +290,7 @@ function changedPaths(tool: string, output: unknown): string[] {
 }
 
 function resolveFlowLensCli(): string | undefined {
+  if (!ALLOW_FLOWLENS) return undefined;
   const configured = process.env.FLOWLENS_CLI;
   if (configured && existsSync(configured)) return resolve(configured);
   const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));

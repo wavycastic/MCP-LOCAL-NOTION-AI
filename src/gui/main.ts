@@ -12,8 +12,9 @@ type DashboardConfig = {
 	gitnexusLocalUrl: string
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
+	allowFlowlens: boolean
 }
-type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken">>
+type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens">>
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -131,11 +132,13 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const gitPort = env.GITNEXUS_PROXY_PORT || "3000"
 	const mcpToken = env.MCP_TOKEN || saved.mcpToken || readEnvValue("MCP_TOKEN") || randomToken()
 	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || saved.gitnexusToken || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || randomToken()
+	const allowFlowlens = env.ALLOW_FLOWLENS !== undefined ? env.ALLOW_FLOWLENS === "true" : (saved.allowFlowlens ?? true)
 	writeSavedConfig({
 		mcpToken,
 		gitnexusToken: gitToken,
 		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
+		allowFlowlens,
 	})
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
@@ -144,6 +147,7 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 		gitnexusLocalUrl: `http://127.0.0.1:${gitPort}/mcp`,
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
 		gitnexusToken: gitToken,
+		allowFlowlens,
 	}
 }
 

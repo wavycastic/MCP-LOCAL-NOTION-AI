@@ -167,6 +167,7 @@
 		<input id="PORT" value="8765" />
 		<input id="HOST" value="127.0.0.1" />
 		<input id="ALLOW_TERMINAL" value="true" />
+		<input id="ALLOW_FLOWLENS" value="true" />
 		<input id="GITNEXUS_PROXY_PORT" value="3000" />
 		<input id="MCP_TOKEN" />
 		<input id="GITNEXUS_TOKEN" />
@@ -198,6 +199,12 @@
 							<button class="secondary" id="gen-mcp-token" title="Generate token">Gen</button>
 							<button class="secondary" id="copy-mcp-token">Copy</button>
 						</div>
+					</div>
+					<div class="form-group" style="margin-top: 5px;">
+						<label style="display: flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; font-size: 10px; color: #d4d4d4; font-weight: 500;">
+							<input type="checkbox" id="allowFlowlens" checked style="width: auto; height: auto; cursor: pointer; accent-color: #3b82f6;" />
+							<span>Enable FlowLens (Semantic Search & Code Graph)</span>
+						</label>
 					</div>
 				</section>
 
