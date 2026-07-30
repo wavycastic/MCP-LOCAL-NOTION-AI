@@ -7,48 +7,56 @@
 	<style>
 		:root {
 			color-scheme: dark;
-			font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+			font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 		}
 		* { box-sizing: border-box; }
 		
-		/* Hide native scrollbars completely */
 		::-webkit-scrollbar {
-			display: none;
+			width: 6px;
+			height: 6px;
 		}
+		::-webkit-scrollbar-track { background: transparent; }
+		::-webkit-scrollbar-thumb { background: #333333; border-radius: 3px; }
+		::-webkit-scrollbar-thumb:hover { background: #555555; }
 
 		body {
 			margin: 0;
-			background: #000000;
-			color: #f5f5f5;
-			font-size: 11px;
+			background: #09090b;
+			color: #f4f4f5;
+			font-size: 12px;
 			overflow: hidden;
 			height: 100vh;
+			user-select: none;
 		}
-		h2 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #ffffff; }
+		
 		main {
 			height: 100vh;
-			padding: 6px;
+			padding: 10px 12px;
 			display: flex;
 			flex-direction: column;
-			gap: 4px;
+			gap: 8px;
 			box-sizing: border-box;
 		}
 
 		/* 2 Navigation Tabs */
 		.nav-tabs {
 			display: flex;
-			gap: 4px;
+			gap: 6px;
 			flex-shrink: 0;
+			background: #18181b;
+			padding: 3px;
+			border-radius: 8px;
+			border: 1px solid #27272a;
 		}
 		.nav-tab {
 			flex: 1;
-			height: 24px;
-			font-size: 10px;
+			height: 28px;
+			font-size: 11px;
 			font-weight: 600;
-			background: #141414;
-			color: #888888;
-			border: 1px solid #222222;
-			border-radius: 4px;
+			background: transparent;
+			color: #a1a1aa;
+			border: 0;
+			border-radius: 6px;
 			cursor: pointer;
 			display: flex;
 			align-items: center;
@@ -56,13 +64,13 @@
 			transition: all 0.15s ease;
 		}
 		.nav-tab:hover {
-			background: #1f1f1f;
-			color: #d4d4d4;
+			color: #f4f4f5;
+			background: #27272a;
 		}
 		.nav-tab.active {
-			background: #1e293b;
+			background: #2563eb;
 			color: #ffffff;
-			border-color: #3b82f6;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 		}
 
 		.view-container {
@@ -74,7 +82,7 @@
 		.view {
 			display: flex;
 			flex-direction: column;
-			gap: 4px;
+			gap: 8px;
 			height: 100%;
 		}
 		.view.hidden {
@@ -82,51 +90,150 @@
 		}
 
 		.card {
-			background: #0d0d0d;
-			border: 1px solid #222222;
-			border-radius: 5px;
-			padding: 6px 8px;
+			background: #18181b;
+			border: 1px solid #27272a;
+			border-radius: 8px;
+			padding: 10px 12px;
 			min-width: 0;
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
 		}
-		.form-group { margin-bottom: 3px; }
-		label { display: block; font-size: 8.5px; color: #888888; margin-bottom: 1px; font-weight: 600; text-transform: uppercase; }
-		.input-group { display: flex; gap: 3px; align-items: center; }
+		h2 {
+			margin: 0 0 2px;
+			font-size: 12px;
+			font-weight: 700;
+			color: #f4f4f5;
+			letter-spacing: 0.3px;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+		}
+		.form-group {
+			display: flex;
+			flex-direction: column;
+			gap: 3px;
+		}
+		label {
+			font-size: 10px;
+			color: #a1a1aa;
+			font-weight: 600;
+			letter-spacing: 0.4px;
+			text-transform: uppercase;
+		}
+		.input-group {
+			display: flex;
+			gap: 5px;
+			align-items: center;
+		}
 		input[type="text"],
 		input[type="password"],
 		input:not([type]) {
 			flex: 1;
 			width: 100%;
 			box-sizing: border-box;
-			padding: 3px 6px;
-			height: 23px;
-			border-radius: 4px;
-			border: 1px solid #262626;
-			background: #000000;
-			color: #f5f5f5;
-			font-size: 10px;
-			font-family: Consolas, Monaco, monospace;
+			padding: 4px 8px;
+			height: 28px;
+			border-radius: 6px;
+			border: 1px solid #3f3f46;
+			background: #09090b;
+			color: #f4f4f5;
+			font-size: 11px;
+			font-family: ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
+			transition: border-color 0.15s ease;
 		}
-		input:focus { border-color: #3b82f6; outline: none; }
-		input[readonly] { background: #0a0a0a; color: #888888; }
+		input:focus {
+			border-color: #3b82f6;
+			outline: none;
+			box-shadow: 0 0 0 1px #3b82f6;
+		}
+		input[readonly] {
+			background: #121215;
+			color: #a1a1aa;
+		}
 		button {
 			border: 0;
-			border-radius: 4px;
-			padding: 3px 7px;
-			height: 23px;
+			border-radius: 6px;
+			padding: 4px 10px;
+			height: 28px;
 			color: white;
 			cursor: pointer;
 			font-weight: 600;
-			font-size: 9.5px;
+			font-size: 11px;
 			white-space: nowrap;
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
+			transition: all 0.15s ease;
 		}
-		button.secondary { background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a; }
-		button.secondary:hover { background: #262626; color: #ffffff; }
-		.global-actions { display: flex; gap: 4px; margin-top: auto; }
-		.global-actions button { flex: 1; height: 26px; font-size: 10px; background: #1a1a1a; color: #d4d4d4; border: 1px solid #2a2a2a; }
-		.global-actions button:hover { background: #262626; color: #ffffff; }
+		button.secondary {
+			background: #27272a;
+			color: #e4e4e7;
+			border: 1px solid #3f3f46;
+		}
+		button.secondary:hover {
+			background: #3f3f46;
+			color: #ffffff;
+			border-color: #52525b;
+		}
+		.checkbox-group {
+			margin-top: 2px;
+		}
+		.checkbox-label {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			cursor: pointer;
+			text-transform: none;
+			font-size: 11px;
+			color: #e4e4e7;
+			font-weight: 500;
+			user-select: none;
+		}
+		.checkbox-label input[type="checkbox"] {
+			width: 15px;
+			height: 15px;
+			cursor: pointer;
+			accent-color: #2563eb;
+			border-radius: 4px;
+		}
+		
+		.global-actions {
+			display: flex;
+			gap: 8px;
+			margin-top: auto;
+			padding-top: 2px;
+		}
+		.global-actions button {
+			flex: 1;
+			height: 32px;
+			font-size: 11px;
+			font-weight: 600;
+			background: #27272a;
+			color: #f4f4f5;
+			border: 1px solid #3f3f46;
+			border-radius: 6px;
+		}
+		.global-actions button:hover {
+			background: #3f3f46;
+			border-color: #52525b;
+		}
+		.global-actions button#start-all {
+			background: #15803d;
+			border-color: #166534;
+			color: #ffffff;
+		}
+		.global-actions button#start-all:hover {
+			background: #166534;
+		}
+		.global-actions button#stop-all {
+			background: #be123c;
+			border-color: #9f1239;
+			color: #ffffff;
+		}
+		.global-actions button#stop-all:hover {
+			background: #9f1239;
+		}
 		
 		pre#log {
 			margin: 0;
@@ -134,15 +241,15 @@
 			overflow-y: auto;
 			white-space: pre-wrap;
 			word-break: break-all;
-			font: 9.5px/1.4 Consolas, Monaco, monospace;
-			background: #000000;
-			border: 1px solid #222222;
-			border-radius: 5px;
-			padding: 6px;
-			color: #d4d4d4;
+			font: 10.5px/1.5 ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
+			background: #09090b;
+			border: 1px solid #27272a;
+			border-radius: 8px;
+			padding: 8px 10px;
+			color: #d4d4d8;
 		}
-		.log-line { display: block; margin-bottom: 1px; }
-		.log-time { color: #666666; font-size: 8.5px; margin-right: 4px; }
+		.log-line { display: block; margin-bottom: 2px; }
+		.log-time { color: #71717a; font-size: 9.5px; margin-right: 6px; }
 		.log-src-mcp { color: #60a5fa; font-weight: 600; }
 		.log-src-gitnexus { color: #c084fc; font-weight: 600; }
 		.log-src-sys { color: #4ade80; font-weight: 600; }
@@ -200,9 +307,9 @@
 							<button class="secondary" id="copy-mcp-token">Copy</button>
 						</div>
 					</div>
-					<div class="form-group" style="margin-top: 5px;">
-						<label style="display: flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; font-size: 10px; color: #d4d4d4; font-weight: 500;">
-							<input type="checkbox" id="allowFlowlens" checked style="width: auto; height: auto; cursor: pointer; accent-color: #3b82f6;" />
+					<div class="form-group checkbox-group">
+						<label class="checkbox-label">
+							<input type="checkbox" id="allowFlowlens" checked />
 							<span>Enable FlowLens (Semantic Search & Code Graph)</span>
 						</label>
 					</div>
