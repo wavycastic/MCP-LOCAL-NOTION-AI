@@ -230,7 +230,7 @@ function createWindow() {
 	const iconPath = getIconPath()
 	win = new BrowserWindow({
 		width: 580,
-		height: 440,
+		height: 475,
 		resizable: false,
 		maximizable: false,
 		autoHideMenuBar: true,
