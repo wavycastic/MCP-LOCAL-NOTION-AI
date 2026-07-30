@@ -10,6 +10,7 @@ type Config = {
 	gitnexusLocalUrl: string
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
+	allowFlowlens: boolean
 }
 
 type Api = {
@@ -109,6 +110,11 @@ function appendLog(line: { at: string; source: string; text: string } | string) 
 }
 
 async function refreshConfig() {
+	const savedAllowFlowlens = localStorage.getItem("allowFlowlens") !== "false"
+	if (els.allowFlowlens) els.allowFlowlens.checked = savedAllowFlowlens
+	const allowFlowlensInput = document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement | null
+	if (allowFlowlensInput) allowFlowlensInput.value = String(savedAllowFlowlens)
+
 	const c = await window.localRepoMcp.config(env())
 	if (els.mcpLocal) els.mcpLocal.value = c.mcpLocalUrl
 	els.mcpPublic.value = c.mcpPublicUrl || localStorage.getItem("mcpPublicUrl") || "https://mcp.wavycastic.id.vn/mcp"
@@ -118,10 +124,10 @@ async function refreshConfig() {
 	const gitToken = c.gitnexusToken || localStorage.getItem("gitnexusToken") || ""
 	els.mcpToken.value = mcpToken
 	els.gitToken.value = gitToken
-	if (els.allowFlowlens) els.allowFlowlens.checked = localStorage.getItem("allowFlowlens") !== "false"
+	if (els.allowFlowlens) els.allowFlowlens.checked = c.allowFlowlens
 	;(document.getElementById("MCP_TOKEN") as HTMLInputElement).value = mcpToken
 	;(document.getElementById("GITNEXUS_TOKEN") as HTMLInputElement).value = gitToken
-	;(document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement).value = String(els.allowFlowlens?.checked ?? true)
+	;(document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement).value = String(c.allowFlowlens)
 	if (els.mode) els.mode.textContent = "Local only"
 }
 
@@ -176,7 +182,14 @@ els.mcpPublic?.addEventListener("input", saveCustomValues)
 els.gitPublic?.addEventListener("input", saveCustomValues)
 els.mcpToken?.addEventListener("input", saveCustomValues)
 els.gitToken?.addEventListener("input", saveCustomValues)
-els.allowFlowlens?.addEventListener("change", saveCustomValues)
+els.allowFlowlens?.addEventListener("change", async () => {
+	saveCustomValues()
+	if (lastState.mcp.running) {
+		appendLog({ at: new Date().toISOString(), source: "gui", text: "Restarting local-repo-mcp to apply FlowLens setting change..." })
+		await window.localRepoMcp.stopMcp()
+		await window.localRepoMcp.startMcp(env())
+	}
+})
 
 document.getElementById("start-all")?.addEventListener("click", async () => {
 	saveCustomValues()

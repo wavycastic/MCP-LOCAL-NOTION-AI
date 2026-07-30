@@ -132,7 +132,9 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const gitPort = env.GITNEXUS_PROXY_PORT || "3000"
 	const mcpToken = env.MCP_TOKEN || saved.mcpToken || readEnvValue("MCP_TOKEN") || randomToken()
 	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || saved.gitnexusToken || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || randomToken()
-	const allowFlowlens = env.ALLOW_FLOWLENS !== undefined ? env.ALLOW_FLOWLENS === "true" : (saved.allowFlowlens ?? true)
+	const allowFlowlens = env.ALLOW_FLOWLENS !== undefined && env.ALLOW_FLOWLENS !== ""
+		? env.ALLOW_FLOWLENS === "true"
+		: (saved.allowFlowlens ?? true)
 	writeSavedConfig({
 		mcpToken,
 		gitnexusToken: gitToken,
