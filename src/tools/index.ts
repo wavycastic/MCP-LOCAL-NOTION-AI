@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
-import { TOOL_PROFILE } from "../config.js"
+import { ALLOW_FLOWLENS, TOOL_PROFILE } from "../config.js"
 import { withLock } from "../lock.js"
 import { audit } from "../log.js"
 import { resolveRepo } from "../repos.js"
@@ -65,6 +65,11 @@ function lockKey(args: any): string {
 	}
 }
 
+export const FLOWLENS_TOOLS = new Set([
+	"repo_overview", "inspect_codebase", "index_files", "find_symbol",
+	"explain_symbol", "find_references", "trace_flow", "what_breaks",
+	"search_code", "prepare_change", "can_edit", "verify_change", "reindex",
+])
 export const CORE_ALLOWED = new Set([
 	"list_repos", "read_file", "read_many_files", "list_dir", "glob_files", "ripgrep",
 	"edit_file", "multi_edit_file", "create_file", "run_build", "run_tests", "run_lint",
@@ -78,6 +83,7 @@ export const CORE_ALLOWED = new Set([
 export const AGENT_ALLOWED = new Set(["list_repos", "repo_overview", "inspect_codebase", "explain_symbol", "trace_flow", "read_context", "apply_patch", "what_breaks", "run_typecheck", "run_tests", "git_status", "search_code", "prepare_change", "can_edit", "verify_change"])
 
 function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler, opts: Opts = {}) {
+	if (!ALLOW_FLOWLENS && FLOWLENS_TOOLS.has(name)) return
 	if (TOOL_PROFILE === "safe" && (opts.destructive || opts.openWorld || name === "git_push")) return
 	if (TOOL_PROFILE === "core" && !CORE_ALLOWED.has(name)) return
 	if (TOOL_PROFILE === "agent" && !AGENT_ALLOWED.has(name)) return
