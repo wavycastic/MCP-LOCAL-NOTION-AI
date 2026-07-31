@@ -237,8 +237,8 @@ function createTray() {
 function createWindow() {
 	const iconPath = getIconPath()
 	win = new BrowserWindow({
-		width: 620,
-		height: 480,
+		width: 500,
+		height: 350,
 		resizable: false,
 		maximizable: false,
 		autoHideMenuBar: true,
