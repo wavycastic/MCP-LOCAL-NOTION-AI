@@ -11,12 +11,13 @@ type Config = {
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
 	allowFlowlens: boolean
+	allowGitnexus: boolean
 }
 
 type Api = {
 	state: () => Promise<State>
 	config: (env: Record<string, string>) => Promise<Config>
-	saveConfig?: (cfg: Partial<Pick<Config, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken">>) => Promise<unknown>
+	saveConfig?: (cfg: Partial<Pick<Config, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens" | "allowGitnexus">>) => Promise<unknown>
 	startMcp: (env: Record<string, string>) => Promise<State>
 	stopMcp: () => Promise<State>
 	startGitnexus: (env: Record<string, string>) => Promise<State>
@@ -32,7 +33,7 @@ declare global {
 	}
 }
 
-const ids = ["MCP_TOKEN", "PORT", "HOST", "ALLOW_TERMINAL", "ALLOW_FLOWLENS", "GITNEXUS_TOKEN", "GITNEXUS_PROXY_PORT"] as const
+const ids = ["MCP_TOKEN", "PORT", "HOST", "ALLOW_TERMINAL", "ALLOW_FLOWLENS", "ALLOW_GITNEXUS", "GITNEXUS_TOKEN", "GITNEXUS_PROXY_PORT"] as const
 const logEl = document.getElementById("log") as HTMLPreElement
 const statusEl = document.getElementById("status") as HTMLSpanElement
 let lastState: State = { mcp: { running: false, pid: null, startedAt: null }, gitnexus: { running: false, pid: null, startedAt: null } }
@@ -44,6 +45,7 @@ const els = {
 	mcpToken: document.getElementById("mcpToken") as HTMLInputElement,
 	gitToken: document.getElementById("gitToken") as HTMLInputElement,
 	allowFlowlens: document.getElementById("allowFlowlens") as HTMLInputElement,
+	allowGitnexus: document.getElementById("allowGitnexus") as HTMLInputElement,
 	mode: document.getElementById("mode") as HTMLSpanElement,
 	serviceState: document.getElementById("serviceState") as HTMLSpanElement,
 	mcpToggle: document.getElementById("toggle-mcp") as HTMLButtonElement,
@@ -115,6 +117,11 @@ async function refreshConfig() {
 	const allowFlowlensInput = document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement | null
 	if (allowFlowlensInput) allowFlowlensInput.value = String(savedAllowFlowlens)
 
+	const savedAllowGitnexus = localStorage.getItem("allowGitnexus") !== "false"
+	if (els.allowGitnexus) els.allowGitnexus.checked = savedAllowGitnexus
+	const allowGitnexusInput = document.getElementById("ALLOW_GITNEXUS") as HTMLInputElement | null
+	if (allowGitnexusInput) allowGitnexusInput.value = String(savedAllowGitnexus)
+
 	const c = await window.localRepoMcp.config(env())
 	if (els.mcpLocal) els.mcpLocal.value = c.mcpLocalUrl
 	els.mcpPublic.value = c.mcpPublicUrl || localStorage.getItem("mcpPublicUrl") || "https://mcp.wavycastic.id.vn/mcp"
@@ -125,9 +132,11 @@ async function refreshConfig() {
 	els.mcpToken.value = mcpToken
 	els.gitToken.value = gitToken
 	if (els.allowFlowlens) els.allowFlowlens.checked = c.allowFlowlens
+	if (els.allowGitnexus) els.allowGitnexus.checked = c.allowGitnexus
 	;(document.getElementById("MCP_TOKEN") as HTMLInputElement).value = mcpToken
 	;(document.getElementById("GITNEXUS_TOKEN") as HTMLInputElement).value = gitToken
 	;(document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement).value = String(c.allowFlowlens)
+	;(document.getElementById("ALLOW_GITNEXUS") as HTMLInputElement).value = String(c.allowGitnexus)
 	if (els.mode) els.mode.textContent = "Local only"
 }
 
@@ -139,21 +148,25 @@ function randomToken() {
 
 function saveCustomValues() {
 	const allowFlowlens = els.allowFlowlens ? els.allowFlowlens.checked : true
+	const allowGitnexus = els.allowGitnexus ? els.allowGitnexus.checked : true
 	const cfg = {
 		mcpPublicUrl: els.mcpPublic.value.trim(),
 		gitnexusPublicUrl: els.gitPublic.value.trim(),
 		mcpToken: els.mcpToken.value.trim(),
 		gitnexusToken: els.gitToken.value.trim(),
 		allowFlowlens,
+		allowGitnexus,
 	}
 	localStorage.setItem("mcpPublicUrl", cfg.mcpPublicUrl)
 	localStorage.setItem("gitnexusPublicUrl", cfg.gitnexusPublicUrl)
 	localStorage.setItem("mcpToken", cfg.mcpToken)
 	localStorage.setItem("gitnexusToken", cfg.gitnexusToken)
 	localStorage.setItem("allowFlowlens", String(allowFlowlens))
+	localStorage.setItem("allowGitnexus", String(allowGitnexus))
 	;(document.getElementById("MCP_TOKEN") as HTMLInputElement).value = els.mcpToken.value.trim()
 	;(document.getElementById("GITNEXUS_TOKEN") as HTMLInputElement).value = els.gitToken.value.trim()
 	;(document.getElementById("ALLOW_FLOWLENS") as HTMLInputElement).value = String(allowFlowlens)
+	;(document.getElementById("ALLOW_GITNEXUS") as HTMLInputElement).value = String(allowGitnexus)
 	void window.localRepoMcp.saveConfig?.(cfg)
 }
 
@@ -188,6 +201,16 @@ els.allowFlowlens?.addEventListener("change", async () => {
 		appendLog({ at: new Date().toISOString(), source: "gui", text: "Restarting local-repo-mcp to apply FlowLens setting change..." })
 		await window.localRepoMcp.stopMcp()
 		await window.localRepoMcp.startMcp(env())
+	}
+})
+els.allowGitnexus?.addEventListener("change", async () => {
+	saveCustomValues()
+	if (lastState.gitnexus.running && !els.allowGitnexus.checked) {
+		appendLog({ at: new Date().toISOString(), source: "gui", text: "Stopping GitNexus MCP (disabled by user)..." })
+		await window.localRepoMcp.stopGitnexus()
+	} else if (!lastState.gitnexus.running && els.allowGitnexus.checked) {
+		appendLog({ at: new Date().toISOString(), source: "gui", text: "Starting GitNexus MCP (enabled by user)..." })
+		await window.localRepoMcp.startGitnexus(env())
 	}
 })
 

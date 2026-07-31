@@ -85,6 +85,9 @@ export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
 /** Kill switch cho FlowLens semantic search & code graph. Mac dinh TRUE. */
 export const ALLOW_FLOWLENS = bool("ALLOW_FLOWLENS", true)
 
+/** Kill switch cho GitNexus MCP proxy. Mac dinh TRUE. */
+export const ALLOW_GITNEXUS = bool("ALLOW_GITNEXUS", true)
+
 /**
  * Che do toan quyen may cuc bo. Khi bat, them repo ao "system" cho phep dung
  * duong dan tuyet doi (C:\..., E:\...) va chay terminal o bat ky thu muc nao.

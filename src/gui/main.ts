@@ -13,8 +13,9 @@ type DashboardConfig = {
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
 	allowFlowlens: boolean
+	allowGitnexus: boolean
 }
-type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens">>
+type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens" | "allowGitnexus">>
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -135,12 +136,16 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const allowFlowlens = env.ALLOW_FLOWLENS !== undefined && env.ALLOW_FLOWLENS !== ""
 		? env.ALLOW_FLOWLENS === "true"
 		: (saved.allowFlowlens ?? true)
+	const allowGitnexus = env.ALLOW_GITNEXUS !== undefined && env.ALLOW_GITNEXUS !== ""
+		? env.ALLOW_GITNEXUS === "true"
+		: (saved.allowGitnexus ?? true)
 	writeSavedConfig({
 		mcpToken,
 		gitnexusToken: gitToken,
 		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
 		allowFlowlens,
+		allowGitnexus,
 	})
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
@@ -150,6 +155,7 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
 		gitnexusToken: gitToken,
 		allowFlowlens,
+		allowGitnexus,
 	}
 }
 
@@ -290,6 +296,11 @@ function startMcp(env: Record<string, string>) {
 
 function startGitnexus(env: Record<string, string>) {
 	if (procs.gitnexus.child) return state()
+	const cfg = dashboardConfig(env)
+	if (!cfg.allowGitnexus) {
+		appendLog("gui", "GitNexus MCP is disabled by ALLOW_GITNEXUS=false setting.")
+		return state()
+	}
 	const entry = join(rootDir(), "scripts", "gitnexus-proxy.mjs")
 	if (!existsSync(entry)) throw new Error(`khong tim thay ${entry}`)
 	const token = dashboardConfig(env).gitnexusToken
