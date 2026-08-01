@@ -1,6 +1,7 @@
 import { z } from "zod"
 import {
 	ALLOW_TERMINAL,
+	PTY_HOLD_LOCK,
 	PTY_MAX_INPUT_CHARS,
 	PTY_READ_MAX_BYTES,
 	TERMINAL_INHERIT_SECRETS,
@@ -64,9 +65,20 @@ export async function terminalStart(a: {
 		rows: a.rows ?? 30,
 	}
 
-	// Hold the exclusive repo lease for the complete PTY lifetime. Read/write/
-	// resize/close calls bypass the outer registry lock and address this owner
-	// session directly, so they cannot deadlock behind their own lease.
+	// Chi giu lease trong luc SPAWN, khong giu suot doi PTY.
+	//
+	// Truoc day ham nay `await waitForPtySession(...)` NGAY BEN TRONG withLock, nghia la
+	// mot shell interactive giu doc quyen repo toi PTY_MAX_LIFETIME_MS (mac dinh 4 tieng).
+	// Suot thoi gian do moi tool co ghi tren repo do xep hang roi chet vi LOCK_WAIT_MS
+	// (120s). Voi kich ban orchestration — mot agent chay lau trong PTY trong khi agent
+	// khac van can edit/commit — day la deadlock tren thuc te, khong phai ly thuyet.
+	//
+	// Danh doi: build/test co the chay song song voi shell interactive. Do la lua chon
+	// cua nguoi mo shell. Dat PTY_HOLD_LOCK=true de quay lai hanh vi doc chiem cu.
+	if (!PTY_HOLD_LOCK) {
+		return await withLock(repo.root, "terminal_start", async () => startPtySession(startArgs))
+	}
+
 	return await new Promise((resolve, reject) => {
 		let started = false
 		void withLock(repo.root, "terminal_start", async () => {
