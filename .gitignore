@@ -12,3 +12,8 @@ config.docker.yml
 release/
 .flowlens/
 
+# Nhi phan tai ve, KHONG commit. Ban 54MB tung nam trong repo nay va di theo moi
+# lan clone vinh vien. Lay bang: npm run tunnel (npx cloudflared) hoac tai tay.
+cloudflared.exe
+cloudflared
+
