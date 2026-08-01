@@ -15,7 +15,8 @@
     "dist:win": "npm run build && electron-builder --win portable",
     "tunnel": "npx cloudflared tunnel --config config.yml run",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "agent": "tsx --env-file=.env scripts/antigravity-smoke.ts"
   },
   "main": "dist/gui/main.js",
   "build": {
