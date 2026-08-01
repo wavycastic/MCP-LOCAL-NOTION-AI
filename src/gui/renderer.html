@@ -283,24 +283,70 @@
 		}
 		
 		/* WinUI 3 Terminal Log View */
+		.log-actions {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 6px;
+			margin-bottom: 6px;
+			flex-shrink: 0;
+		}
+		.log-actions input {
+			height: 24px;
+			font-size: 10.5px;
+			width: 150px;
+		}
 		pre#log {
 			margin: 0;
 			flex: 1;
-			overflow-y: auto;
+			overflow: auto;
 			white-space: pre-wrap;
-			word-break: break-all;
-			font: 10px/1.4 "Segoe UI Mono", Consolas, Monaco, monospace;
-			background: rgba(0, 0, 0, 0.3);
+			word-break: break-word;
+			font: 11px/1.45 Consolas, "Segoe UI Mono", "Courier New", monospace;
+			background: #111113;
 			border: 1px solid rgba(255, 255, 255, 0.08);
 			border-radius: 6px;
 			padding: 8px 10px;
 			color: #e4e4e7;
+			user-select: text;
+			-webkit-user-select: text;
+			tab-size: 2;
 		}
-		.log-line { display: block; margin-bottom: 2px; }
-		.log-time { color: rgba(255, 255, 255, 0.4); font-size: 9.5px; margin-right: 6px; }
-		.log-src-mcp { color: #60cdff; font-weight: 600; }
-		.log-src-gitnexus { color: #c084fc; font-weight: 600; }
-		.log-src-sys { color: #6ccb5f; font-weight: 600; }
+		pre#log ::selection {
+			background: rgba(96, 205, 255, 0.3);
+			color: #ffffff;
+		}
+		.log-row {
+			padding: 1px 2px;
+			border-radius: 3px;
+			user-select: text;
+			-webkit-user-select: text;
+		}
+		.log-row:hover {
+			background: rgba(255, 255, 255, 0.04);
+		}
+		.log-row.hidden {
+			display: none !important;
+		}
+		.log-t {
+			color: #71717a;
+			font-size: 10px;
+			margin-right: 6px;
+			user-select: none;
+		}
+		.log-src {
+			font-weight: 600;
+			margin-right: 6px;
+			user-select: none;
+		}
+		.log-src-mcp { color: #60cdff; }
+		.log-src-gitnexus { color: #c084fc; }
+		.log-src-tunnel { color: #f97316; }
+		.log-src-gui { color: #4ade80; }
+		.log-src-sys { color: #a1a1aa; }
+		.log-txt {
+			color: #e4e4e7;
+		}
 	</style>
 </head>
 <body>
@@ -342,10 +388,6 @@
 				<section class="card">
 					<div class="card-header">
 						<h2>Local MCP</h2>
-						<label class="checkbox-label" title="Enable FlowLens Semantic Search & Code Graph">
-							<input type="checkbox" id="allowFlowlens" checked />
-							<span>Enable FlowLens</span>
-						</label>
 					</div>
 					<div class="form-group">
 						<label>Public URL</label>
@@ -364,28 +406,20 @@
 					</div>
 				</section>
 
-				<!-- GitNexus MCP Card -->
+				<!-- Cloudflare Tunnel Card -->
 				<section class="card">
 					<div class="card-header">
-						<h2>GitNexus MCP</h2>
-						<label class="checkbox-label" title="Enable GitNexus MCP Proxy">
-							<input type="checkbox" id="allowGitnexus" checked />
-							<span>Enable Service</span>
+						<h2>Cloudflare Tunnel</h2>
+						<label class="checkbox-label" title="Enable Cloudflare Tunnel for Public URLs">
+							<input type="checkbox" id="allowTunnel" checked />
+							<span>Enable Tunnel</span>
 						</label>
 					</div>
 					<div class="form-group">
-						<label>Public URL</label>
+						<label>Tunnel Status</label>
 						<div class="input-group">
-							<input id="gitPublic" value="https://gitnexus.wavycastic.id.vn/mcp" placeholder="https://gitnexus.wavycastic.id.vn/mcp" />
-							<button class="secondary" id="copy-git-public">Copy</button>
-						</div>
-					</div>
-					<div class="form-group">
-						<label>Token</label>
-						<div class="input-group">
-							<input id="gitToken" type="text" />
-							<button class="secondary" id="gen-git-token" title="Generate token">Gen</button>
-							<button class="secondary" id="copy-git-token">Copy</button>
+							<input id="tunnelStatus" type="text" value="Stopped" readonly />
+							<button class="secondary" id="toggle-tunnel">Start Tunnel</button>
 						</div>
 					</div>
 				</section>
@@ -399,6 +433,13 @@
 
 			<!-- View 2: Logs -->
 			<div class="view hidden" id="view-log">
+				<div class="log-actions">
+					<input id="log-filter" type="text" placeholder="Filter logs..." />
+					<div style="display: flex; gap: 6px;">
+						<button class="secondary" id="copy-log-all" style="height: 22px; font-size: 10px; padding: 0 8px;">Copy All</button>
+						<button class="secondary" id="clear-log-btn" style="height: 22px; font-size: 10px; padding: 0 8px;">Clear</button>
+					</div>
+				</div>
 				<pre id="log"></pre>
 			</div>
 		</div>

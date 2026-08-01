@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from "electron"
+import { app, BrowserWindow, ipcMain, Menu, MenuItem, nativeImage, Tray } from "electron"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -12,8 +12,8 @@ type DashboardConfig = {
 	gitnexusLocalUrl: string
 	gitnexusPublicUrl: string | null
 	gitnexusToken: string
-	allowFlowlens: boolean
-	allowGitnexus: boolean
+	allowFlowlens?: boolean
+	allowGitnexus?: boolean
 }
 type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens" | "allowGitnexus">>
 
@@ -21,9 +21,10 @@ let win: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 
-const procs: Record<"mcp" | "gitnexus", { child: ChildProcessWithoutNullStreams | null; startedAt: string | null }> = {
+const procs: Record<"mcp" | "gitnexus" | "tunnel", { child: ChildProcessWithoutNullStreams | null; startedAt: string | null }> = {
 	mcp: { child: null, startedAt: null },
 	gitnexus: { child: null, startedAt: null },
+	tunnel: { child: null, startedAt: null },
 }
 
 function randomToken(): string {
@@ -133,19 +134,11 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const gitPort = env.GITNEXUS_PROXY_PORT || "3000"
 	const mcpToken = env.MCP_TOKEN || saved.mcpToken || readEnvValue("MCP_TOKEN") || randomToken()
 	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || saved.gitnexusToken || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || randomToken()
-	const allowFlowlens = env.ALLOW_FLOWLENS !== undefined && env.ALLOW_FLOWLENS !== ""
-		? env.ALLOW_FLOWLENS === "true"
-		: (saved.allowFlowlens ?? true)
-	const allowGitnexus = env.ALLOW_GITNEXUS !== undefined && env.ALLOW_GITNEXUS !== ""
-		? env.ALLOW_GITNEXUS === "true"
-		: (saved.allowGitnexus ?? true)
 	writeSavedConfig({
 		mcpToken,
 		gitnexusToken: gitToken,
 		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
-		allowFlowlens,
-		allowGitnexus,
 	})
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
@@ -154,25 +147,23 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 		gitnexusLocalUrl: `http://127.0.0.1:${gitPort}/mcp`,
 		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
 		gitnexusToken: gitToken,
-		allowFlowlens,
-		allowGitnexus,
 	}
 }
 
 function state() {
-	const one = (k: "mcp" | "gitnexus"): ProcState => ({
+	const one = (k: "mcp" | "gitnexus" | "tunnel"): ProcState => ({
 		running: !!procs[k].child,
 		pid: procs[k].child?.pid ?? null,
 		startedAt: procs[k].startedAt,
 	})
-	return { mcp: one("mcp"), gitnexus: one("gitnexus") }
+	return { mcp: one("mcp"), gitnexus: one("gitnexus"), tunnel: one("tunnel") }
 }
 
 function send(channel: string, payload: unknown) {
 	win?.webContents.send(channel, payload)
 }
 
-function appendLog(source: "mcp" | "gitnexus" | "gui", text: string) {
+function appendLog(source: "mcp" | "gitnexus" | "tunnel" | "gui", text: string) {
 	send("log", { at: new Date().toISOString(), source, text })
 }
 
@@ -238,7 +229,7 @@ function createWindow() {
 	const iconPath = getIconPath()
 	win = new BrowserWindow({
 		width: 520,
-		height: 375,
+		height: 480,
 		resizable: false,
 		maximizable: false,
 		autoHideMenuBar: true,
@@ -252,6 +243,24 @@ function createWindow() {
 	win.setMenu(null)
 	win.loadFile(join(rootDir(), "dist", "gui", "renderer.html"))
 	
+	win.webContents.on("context-menu", (_evt, params) => {
+		const menu = new Menu()
+		if (params.isEditable) {
+			menu.append(new MenuItem({ label: "Cut", role: "cut" }))
+			menu.append(new MenuItem({ label: "Copy", role: "copy" }))
+			menu.append(new MenuItem({ label: "Paste", role: "paste" }))
+			menu.append(new MenuItem({ label: "Select All", role: "selectAll" }))
+		} else if (params.selectionText.trim().length > 0) {
+			menu.append(new MenuItem({ label: "Copy", role: "copy" }))
+			menu.append(new MenuItem({ label: "Select All", role: "selectAll" }))
+		} else {
+			menu.append(new MenuItem({ label: "Select All", role: "selectAll" }))
+		}
+		if (menu.items.length > 0) {
+			menu.popup({ window: win ?? undefined })
+		}
+	})
+
 	// Prevent app exit on close click -> hide to tray instead
 	win.on("close", (evt) => {
 		if (!isQuitting) {
@@ -325,7 +334,40 @@ function startGitnexus(env: Record<string, string>) {
 	return state()
 }
 
-function wire(kind: "mcp" | "gitnexus") {
+function startTunnel() {
+	if (procs.tunnel.child) return state()
+	const configYml = join(repoRoot(), "config.yml")
+	const candidates = [
+		join(repoRoot(), "cloudflared.exe"),
+		join(rootDir(), "cloudflared.exe"),
+		join(dirname(process.execPath), "cloudflared.exe"),
+		join(process.cwd(), "cloudflared.exe"),
+	]
+
+	let cmd = process.platform === "win32" ? "npx.cmd" : "npx"
+	let args = ["cloudflared", "tunnel", "--config", configYml, "run"]
+
+	for (const p of candidates) {
+		if (existsSync(p)) {
+			cmd = p
+			args = ["tunnel", "--config", configYml, "run"]
+			break
+		}
+	}
+
+	procs.tunnel.startedAt = new Date().toISOString()
+	procs.tunnel.child = spawn(cmd, args, {
+		cwd: repoRoot(),
+		env: process.env as Record<string, string>,
+		windowsHide: true,
+	})
+	wire("tunnel")
+	appendLog("gui", `started cloudflared tunnel (${cmd}) pid=${procs.tunnel.child.pid ?? "?"}`)
+	send("state", state())
+	return state()
+}
+
+function wire(kind: "mcp" | "gitnexus" | "tunnel") {
 	const child = procs[kind].child
 	if (!child) return
 	child.stdout.on("data", (d) => appendLog(kind, d.toString()))
@@ -339,7 +381,7 @@ function wire(kind: "mcp" | "gitnexus") {
 	child.on("error", (e) => appendLog("gui", `${kind} error: ${e.message}`))
 }
 
-function stop(kind: "mcp" | "gitnexus") {
+function stop(kind: "mcp" | "gitnexus" | "tunnel") {
 	const child = procs[kind].child
 	if (!child) return state()
 	appendLog("gui", `stopping ${kind}`)
@@ -362,6 +404,8 @@ ipcMain.handle("start-mcp", (_evt: unknown, env: Record<string, string>) => star
 ipcMain.handle("stop-mcp", () => stop("mcp"))
 ipcMain.handle("start-gitnexus", (_evt: unknown, env: Record<string, string>) => startGitnexus(env))
 ipcMain.handle("stop-gitnexus", () => stop("gitnexus"))
+ipcMain.handle("start-tunnel", () => startTunnel())
+ipcMain.handle("stop-tunnel", () => stop("tunnel"))
 
 app.whenReady().then(() => {
 	Menu.setApplicationMenu(null)
@@ -373,6 +417,7 @@ app.on("window-all-closed", () => {
 	if (isQuitting) {
 		stop("mcp")
 		stop("gitnexus")
+		stop("tunnel")
 		if (process.platform !== "darwin") app.quit()
 	}
 })
@@ -381,4 +426,5 @@ app.on("before-quit", () => {
 	isQuitting = true
 	stop("mcp")
 	stop("gitnexus")
+	stop("tunnel")
 })
