@@ -1,4 +1,5 @@
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -56,6 +57,26 @@ export const WORKSPACE_ROOT = optRealpath("WORKSPACE_ROOT")
 
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)))
 
+/**
+ * Version doc tu package.json — MOT nguon su that duy nhat.
+ *
+ * Truoc day so nay lap o `package.json` va hardcode lai trong `src/index.ts`
+ * (`new McpServer({ version: "0.3.0" })`). Hai cho nhu vay chac chan se lech:
+ * bump package.json roi quen file kia, va client MCP se bao version sai.
+ */
+function readVersion(): string {
+	for (const dir of [appDir, dirname(appDir)]) {
+		try {
+			const raw = readFileSync(resolve(dir, "package.json"), "utf8")
+			const v = (JSON.parse(raw) as { version?: string }).version
+			if (typeof v === "string" && v.length > 0) return v
+		} catch {}
+	}
+	return "0.0.0-unknown"
+}
+
+export const VERSION = readVersion()
+
 function findReposConfig(): string {
 	if (process.env.REPOS_CONFIG) {
 		const envPath = resolve(appDir, process.env.REPOS_CONFIG)
@@ -82,12 +103,6 @@ export const REPOS_CONFIG = findReposConfig()
 /** Repo tu dong tim thay co duoc ghi khong. Mac dinh khong. */
 export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
 
-/** Kill switch cho FlowLens semantic search & code graph. Mac dinh TRUE. */
-export const ALLOW_FLOWLENS = bool("ALLOW_FLOWLENS", true)
-
-/** Kill switch cho GitNexus MCP proxy. Mac dinh TRUE. */
-export const ALLOW_GITNEXUS = bool("ALLOW_GITNEXUS", true)
-
 /**
  * Che do toan quyen may cuc bo. Khi bat, them repo ao "system" cho phep dung
  * duong dan tuyet doi (C:\..., E:\...) va chay terminal o bat ky thu muc nao.
@@ -100,7 +115,8 @@ export const ALLOW_FULL_ACCESS = bool("ALLOW_FULL_ACCESS", false)
 export const DEFAULT_BRANCH_PREFIX = process.env.DEFAULT_BRANCH_PREFIX ?? "agent/"
 
 export const EXEC_TIMEOUT_MS = Number(process.env.EXEC_TIMEOUT_MS ?? 900_000)
-export const MAX_OUTPUT = 200_000
+/** Tran output cho mot lenh chay qua `run()`. */
+export const MAX_OUTPUT = Number(process.env.MAX_OUTPUT ?? 200_000)
 export const MAX_WRITE_BYTES = Number(process.env.MAX_WRITE_BYTES ?? 1_000_000)
 
 /**
@@ -151,6 +167,15 @@ export const PTY_MAX_INPUT_CHARS = Number(process.env.PTY_MAX_INPUT_CHARS ?? 100
 export const PTY_IDLE_TIMEOUT_MS = Number(process.env.PTY_IDLE_TIMEOUT_MS ?? 30 * 60_000)
 export const PTY_MAX_LIFETIME_MS = Number(process.env.PTY_MAX_LIFETIME_MS ?? 4 * 60 * 60_000)
 
+/**
+ * Co giu doc quyen repo suot doi mot PTY session khong. Mac dinh FALSE.
+ *
+ * Bat len = hanh vi cu: mo mot shell interactive la khoa repo toi 4 tieng, moi
+ * tool co ghi khac xep hang roi chet vi LOCK_WAIT_MS. Chi bat khi ban that su
+ * muon mot session doc chiem repo.
+ */
+export const PTY_HOLD_LOCK = bool("PTY_HOLD_LOCK", false)
+
 export type ToolProfile = "agent" | "core" | "safe" | "full"
 const rawProfile = (process.env.TOOL_PROFILE ?? "full").toLowerCase()
 export const TOOL_PROFILE: ToolProfile =
@@ -158,3 +183,57 @@ export const TOOL_PROFILE: ToolProfile =
 
 /** Lenh reindex code graph mac dinh, chay trong tung repo. */
 export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")
+
+/* ── Antigravity sub-agent ──────────────────────────────────────────────── */
+
+function jsonMap(name: string): Record<string, string> {
+	const raw = process.env[name]
+	if (!raw) return {}
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(raw)
+	} catch (e) {
+		throw new Error(`${name} khong phai JSON hop le: ${e instanceof Error ? e.message : String(e)}`)
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error(`${name} phai la JSON object dang {"<key>":"<value>"}`)
+	}
+	const out: Record<string, string> = {}
+	for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+		if (typeof v === "string" && v.length > 0) out[k] = v
+	}
+	return out
+}
+
+/** Kill switch cho bo tool antigravity_*. Mac dinh BAT. */
+export const ANTIGRAVITY_ENABLE = bool("ANTIGRAVITY_ENABLE", true)
+
+/** Bat cua so Terminal tuong tac nguyen ban truoc mat nguoi dung. Mac dinh BAT. */
+export const ANTIGRAVITY_INTERACTIVE = bool("ANTIGRAVITY_INTERACTIVE", true)
+
+
+/**
+ * Antigravity CLI (`agy`). Installer dat binary o %LOCALAPPDATA%\agy\bin tren
+ * Windows va ~/.local/bin tren macOS/Linux.
+ */
+export const ANTIGRAVITY_CLI_BIN =
+	process.env.ANTIGRAVITY_CLI_BIN ??
+	(process.platform === "win32"
+		? resolve(process.env.LOCALAPPDATA ?? homedir(), "agy", "bin", "agy.exe")
+		: resolve(homedir(), ".local", "bin", "agy"))
+
+/** Slug model, xem `agy models`. Khong con la tier flash/pro nhu duong agentapi. */
+export const ANTIGRAVITY_MODEL = process.env.ANTIGRAVITY_MODEL ?? "gemini-3.6-flash-medium"
+
+/**
+ * Headless khong hoi quyen duoc: tool nao can xac nhan se bi tu choi va sub-agent
+ * tra ve rong. Bat co nay = them --dangerously-skip-permissions cho moi lan chay.
+ * Cach hep hon: khai bao permissions.allow trong ~/.gemini/antigravity-cli/settings.json
+ */
+export const ANTIGRAVITY_SKIP_PERMISSIONS = bool("ANTIGRAVITY_SKIP_PERMISSIONS", false)
+
+/** Tran cho mot lan chay, map sang --print-timeout. */
+export const ANTIGRAVITY_TASK_TIMEOUT_MS = Number(process.env.ANTIGRAVITY_TASK_TIMEOUT_MS ?? 900_000)
+
+/** Cho su kien init dau tien — luc do moi biet conversation_id. */
+export const ANTIGRAVITY_START_TIMEOUT_MS = Number(process.env.ANTIGRAVITY_START_TIMEOUT_MS ?? 60_000)

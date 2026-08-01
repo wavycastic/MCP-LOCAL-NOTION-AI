@@ -23,7 +23,11 @@ function resolveCmd(cmd: string): string {
 			if (existsSync(cmd + ext)) return cmd + ext
 		} else {
 			for (const dir of pathDirs) {
-				if (existsSync(join(dir, cmd + ext))) return cmd + ext
+				// Tra ve duong dan DAY DU. Truoc day tra ve ten tran (`cmd + ext`) sau khi
+				// da ton cong quet PATH, de spawn quet lai lan hai — vua lam thua viec, vua
+				// co the resolve ra file khac neu PATH doi giua hai lan quet.
+				const full = join(dir, cmd + ext)
+				if (existsSync(full)) return full
 			}
 		}
 	}
@@ -56,6 +60,39 @@ const WIN_ENV_PASSTHROUGH = [
 
 const SECRET_KEY_PATTERN = /(TOKEN|SECRET|PASSWORD|API_KEY|AUTHORIZATION|COOKIE|CREDENTIAL|AUTH)/i
 
+/**
+ * Bien moi truong client KHONG duoc ghi de.
+ *
+ * `env` tu tool terminal/PTY duoc spread SAU cac gia tri mac dinh trong `childEnv`,
+ * nen truoc day `{ PATH: "C:\\evil" }` doi duoc noi spawn di tim binary: goi `git`
+ * nhung chay `C:\evil\git.exe`. NODE_OPTIONS / LD_PRELOAD / DYLD_INSERT_LIBRARIES con
+ * te hon — chung nap code vao tien trinh con ma khong can doi ten lenh nao ca.
+ *
+ * SECRET_KEY_PATTERN loc thu di RA; danh sach nay chan thu duoc dua VAO.
+ */
+const PROTECTED_ENV_KEYS = new Set([
+	"PATH",
+	"PATHEXT",
+	"COMSPEC",
+	"NODE_OPTIONS",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"DYLD_INSERT_LIBRARIES",
+	"DYLD_LIBRARY_PATH",
+	"ELECTRON_RUN_AS_NODE",
+	"MCP_TOKEN",
+])
+
+function sanitizeExtraEnv(extraEnv?: Record<string, string>): Record<string, string> {
+	if (!extraEnv) return {}
+	const out: Record<string, string> = {}
+	for (const [k, v] of Object.entries(extraEnv)) {
+		if (PROTECTED_ENV_KEYS.has(k.toUpperCase())) continue
+		out[k] = v
+	}
+	return out
+}
+
 function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
 		PATH: process.env.PATH,
@@ -64,7 +101,7 @@ function childEnv(extraEnv?: Record<string, string>): NodeJS.ProcessEnv {
 		DOTNET_NOLOGO: "1",
 		GIT_TERMINAL_PROMPT: "0",
 		...(process.env.ELECTRON_RUN_AS_NODE ? { ELECTRON_RUN_AS_NODE: process.env.ELECTRON_RUN_AS_NODE } : {}),
-		...(extraEnv ?? {}),
+		...sanitizeExtraEnv(extraEnv),
 	}
 	if (process.env.HOME) env.HOME = process.env.HOME
 
@@ -87,6 +124,13 @@ export function buildTerminalEnv(extraEnv?: Record<string, string>, inheritSecre
 		for (const [k, v] of Object.entries(extraEnv)) {
 			if (k.length > 200) throw new Error(`Environment key '${k.slice(0, 20)}...' exceeds 200 characters limit`)
 			if (v.length > 4000) throw new Error(`Environment value for '${k}' exceeds 4000 characters limit`)
+			if (PROTECTED_ENV_KEYS.has(k.toUpperCase())) {
+				throw new Error(
+					`khong duoc ghi de bien moi truong '${k}': no quyet dinh binary nao duoc nap. ` +
+						`Neu can chay mot binary cu the, dat duong dan day du ngay trong 'command' ` +
+						`thay vi doi PATH`,
+				)
+			}
 		}
 	}
 

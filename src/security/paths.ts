@@ -4,7 +4,11 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 export const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
 
 const DENY: RegExp[] = [
-	/(^|\/)\.env(\..*)?$/,
+	// Chan .env, .env.local, .env.production... nhung KHONG chan file template.
+	// Truoc day pattern la /(^|\/)\.env(\..*)?$/ nen no chan ca `.env.example` —
+	// mot file da commit cong khai, khong co bi mat nao. Ket qua: khong sua noi
+	// tai lieu cau hinh cua chinh repo nay bang tool cua chinh no.
+	/(^|\/)\.env(?!\.(example|sample|template)$)(\..*)?$/,
 	/(^|\/)\.git\/(config|credentials)$/,
 	// .git/hooks/ can be weaponised for code execution — deny all hook scripts
 	/(^|\/)\.git\/hooks\//,

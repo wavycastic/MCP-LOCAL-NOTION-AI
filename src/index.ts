@@ -1,13 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import express from "express"
-import { timingSafeEqual } from "node:crypto"
+import { createHash, timingSafeEqual } from "node:crypto"
 import {
 	ALLOW_PUSH,
 	HOST,
 	MCP_TOKEN,
 	PORT,
 	REPOS_CONFIG,
+	VERSION,
 	WORKSPACE_ROOT,
 } from "./config.js"
 import { killRunningJobs } from "./jobs.js"
@@ -15,17 +16,24 @@ import { killAllPtySessions } from "./ptySessions.js"
 import { lockState } from "./lock.js"
 import { allRepos } from "./repos.js"
 import { registerAll } from "./tools/index.js"
-import { replayPendingQueues } from "./flowlens.js"
+
+/**
+ * So sanh token sau khi bam SHA-256.
+ *
+ * Truoc day: `a.length === b.length && timingSafeEqual(a, b)`. Toan tu && short-circuit
+ * ngay o phep so sanh do dai, nen thoi gian phan hoi van lo do dai token — dung
+ * timingSafeEqual ma van con kenh timing. Bam truoc cho hai ben cung 32 byte thi phep
+ * so sanh moi thuc su la hang so.
+ */
+const sha256 = (s: string): Buffer => createHash("sha256").update(s, "utf8").digest()
+const TOKEN_DIGEST = sha256(MCP_TOKEN)
 
 function tokenOk(header?: string): boolean {
 	const got = header?.replace(/^Bearer\s+/i, "") ?? ""
-	const a = Buffer.from(got)
-	const b = Buffer.from(MCP_TOKEN)
-	return a.length === b.length && timingSafeEqual(a, b)
+	return timingSafeEqual(sha256(got), TOKEN_DIGEST)
 }
 
 const app = express()
-app.use(express.json({ limit: "8mb" }))
 
 /**
  * Health check dat TRUOC auth: tunnel/uptime probe khong can token. Vi vay bat ky
@@ -55,13 +63,23 @@ app.use((req, res, next) => {
 	next()
 })
 
+/**
+ * Body parser dat SAU auth, va chi mount vao /mcp.
+ *
+ * Truoc day `app.use(express.json({ limit: "8mb" }))` nam ngay dau chuoi middleware,
+ * nghia la MOI request — ke ca request khong co token — deu duoc parse toi 8MB JSON
+ * TRUOC khi bi tu choi 401. Ai biet URL tunnel deu bat server nay lam viec mien phi,
+ * khong can biet token. Auth phai chan truoc khi ta bo mot byte cong suc nao ra.
+ */
+app.use("/mcp", express.json({ limit: "8mb" }))
+
 /** Chi tiet lock (co duong dan) chi cho nguoi da co token. */
 app.get("/locks", (_req, res) => {
 	res.json({ locks: lockState() })
 })
 
 app.all("/mcp", async (req, res) => {
-	const server = new McpServer({ name: "local-repo-mcp", version: "0.3.0" })
+	const server = new McpServer({ name: "local-repo-mcp", version: VERSION })
 	registerAll(server)
 	const transport = new StreamableHTTPServerTransport({
 		sessionIdGenerator: undefined, // stateless
@@ -94,8 +112,6 @@ const httpServer = app.listen(PORT, HOST, () => {
 				`  ${r.write ? "rw" : "ro"}  ${r.name.padEnd(24)} ${r.toolchain.padEnd(8)} ${r.root}`,
 			)
 		}
-		// Replay pending-index queues after restart (fire-and-forget)
-		replayPendingQueues(repos).catch((e) => console.warn("[pendingQueue] startup replay error:", e))
 	} catch (e) {
 		console.error("khong load duoc danh sach repo:", e)
 	}
