@@ -4,7 +4,7 @@ Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), hỗ tr
 
 > [!IMPORTANT]
 > **Tài liệu được đối chiếu trực tiếp với mã nguồn thực tế (phiên bản v0.3.0).**
-> Server hiện đăng ký **45 công cụ MCP** chính thức, hỗ trợ kiểm soát đường dẫn theo repository, bảo vệ branch, ghi tệp nguyên tử, xác thực Bearer token an toàn và các phương thức thực thi qua Node.js CLI hoặc ứng dụng Electron Desktop.
+> Server hiện đăng ký **48 công cụ MCP** chính thức, hỗ trợ kiểm soát đường dẫn theo repository, bảo vệ branch, ghi tệp nguyên tử, xác thực Bearer token an toàn và các phương thức thực thi qua Node.js CLI hoặc ứng dụng Electron Desktop.
 
 ---
 
@@ -20,8 +20,8 @@ flowchart TD
     
     SubGraphLocks["Repo Lock Manager (withLock)"]
     
-    SubGraphTools["45 Tools Registry"]
-    DiscoveryTools["Phân nhóm: Đọc & khám phá (6)"]
+    SubGraphTools["48 Tools Registry"]
+    DiscoveryTools["Phân nhóm: Đọc & khám phá (9)"]
     EditTools["Phân nhóm: Chỉnh sửa & patch (7)"]
     GitTools["Phân nhóm: Thao tác Git (9)"]
     BuildTools["Phân nhóm: Build, test & job (6)"]
@@ -59,7 +59,7 @@ flowchart TD
 - **Path Resolver & Security**: Đảm bảo mọi đường dẫn tệp đều được phân giải (resolve) và xác minh nằm trong thư mục gốc của repository chỉ định, ngăn chặn path traversal (`../`), symlink escape và kiểm tra danh sách cấm (Deny-List).
 - **Repo Lock Manager**: Quản lý khóa độc quyền theo từng repository (`withLock`) để tránh xung đột ghi tệp và tranh chấp dữ liệu khi có nhiều yêu cầu đồng thời.
 - **PTY Session Manager**: Quản lý các phiên terminal tương tác kéo dài (`node-pty`) có hỗ trợ ring buffer, bộ đếm byte cursor và tự động dọn dẹp khi hết thời gian chờ.
-- **Tree-sitter Symbol Index**: Lập chỉ mục symbol trong tiến trình (TS/JS/C#/Python/Go/Rust), tự vô hiệu theo `repoStamp` và warm lại ngầm sau mỗi `git_commit` — không cần indexer bên ngoài.
+- **Tree-sitter Symbol Index**: Lập chỉ mục symbol trong tiến trình (TS/JS/C#/Python/Go/Rust), tự vô hiệu theo `repoStamp`, warm ngầm ngay khi server khởi động (startup prewarm) và sau mỗi `git_commit` — không cần indexer bên ngoài.
 - **Ứng dụng Electron Desktop**: Cung cấp giao diện đồ họa kèm khay hệ thống (System Tray) để quản lý khởi chạy MCP server và Cloudflare tunnel.
 
 ---
@@ -178,7 +178,7 @@ Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức n�
 | `read_file` | Đọc 1 tệp tin theo đường dẫn tương đối (hỗ trợ phân trang theo dòng và kiểm tra UTF-8 strict). |
 | `read_many_files` | Đọc từ 1 đến 50 tệp tin cùng lúc trong 1 lệnh gọi để giảm số lượt gửi request. |
 | `list_dir` | Liệt kê cây thư mục (tự động bỏ qua `node_modules`, `bin`, `obj`, `dist`, `.git`). |
-| `glob_files` | Tìm đường dẫn tệp theo mẫu pattern glob (cache kết quả regex 250ms). |
+| `glob_files` | Tìm đường dẫn tệp theo mẫu pattern glob (cache kết quả theo `repoStamp`; các tool ghi tự invalidate ngay). |
 | `ripgrep` | Tìm kiếm chuỗi/regex trong codebase (hỗ trợ `all_repos: true` để tìm xuyên các repo). |
 | `get_feature_context` | Gộp glob+grep+đọc file thành 1 lệnh gọi: nhập query, nhận toàn bộ file liên quan trong 1 payload (3 mức chi tiết `detail`: L0 danh sách, L1 outline+đoạn quanh match, L2 nguyên file; cache theo git HEAD + fingerprint). |
 | `trace_flow` | Lần luồng thực thi của 1 symbol trong 1 lệnh gọi: định nghĩa (kèm body), nơi gọi nó (callers), nó gọi gì (callees, hỗ trợ `depth: 2`). |
@@ -187,8 +187,8 @@ Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức n�
 ### Nhóm 2: Chỉnh sửa tệp và áp dụng patch (7 công cụ)
 | Công cụ | Mô tả |
 | :--- | :--- |
-| `edit_file` | Thay thế 1 vị trí văn bản trong 1 tệp (`old_str` -> `new_str`), bảo toàn CRLF/LF và BOM. |
-| `multi_edit_file` | Thay thế nhiều vị trí không liên tục trong 1 tệp ngầm nguyên tử (tự động rollback nếu có khối lỗi). |
+| `edit_file` | Thay thế 1 vị trí văn bản trong 1 tệp (`old_str` -> `new_str`), bảo toàn CRLF/LF và BOM. Response kèm `context` (~11 dòng quanh vết sửa) để verify ngay, khỏi gọi lại `read_file`. |
+| `multi_edit_file` | Thay thế nhiều vị trí không liên tục trong 1 tệp ngầm nguyên tử (tự động rollback nếu có khối lỗi). Response kèm `context` quanh vết sửa đầu tiên. |
 | `apply_patch` | Áp dụng unified diff patch đa tệp (Add, Update, Move, Delete) có hỗ trợ dry-run và rollback nguyên tử. |
 | `create_file` | Tạo tệp mới hoàn toàn (từ chối ghi đè nếu tệp đã tồn tại). |
 | `move_file` | Đổi tên hoặc di chuyển tệp bằng `git mv` (giữ lịch sử commit). |
@@ -242,7 +242,7 @@ Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức n�
 ### Nhóm 7: Hệ thống và thống kê (4 công cụ)
 | Công cụ | Mô tả |
 | :--- | :--- |
-| `reindex` | Chạy lại lệnh re-index mã nguồn thủ công (`repo.reindex`). |
+| `reindex` | Ép build lại tree-sitter symbol index trong tiến trình, bỏ qua mọi cache (index thường tự invalidate theo `repoStamp` — chỉ cần khi muốn làm tươi chủ động). |
 | `health_check` | Liveness probe: Uptime, PID, phiên bản Node.js. |
 | `readiness_check` | Readiness probe: Kiểm tra tính hợp lệ của cấu hình và danh sách repo. |
 | `get_metrics` | Lấy thống kê số lượt gọi công cụ, thời gian thực thi và danh sách phiên PTY. |
@@ -253,8 +253,8 @@ Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức n�
 
 Biến môi trường `TOOL_PROFILE` trong `src/config.ts` cho phép giới hạn danh sách công cụ mở ra cho AI client:
 
-- **`full`** (Mặc định): Mở toàn bộ **45 công cụ**.
-- **`core`**: Mở **28 công cụ cơ bản** (`CORE_ALLOWED` trong `src/tools/index.ts`), ẩn các công cụ chỉnh sửa patch/file nâng cao (`apply_patch`, `move_file`, `remove_file`), `git_push`, `gh_pr`, `kill_job` và các công cụ terminal thực thi lệnh (`terminal`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_resize`, `terminal_close`, `terminal_list`), nhưng **vẫn mở `terminal_wait_for`**.
+- **`full`** (Mặc định): Mở toàn bộ **48 công cụ**.
+- **`core`**: Mở **31 công cụ cơ bản** (`CORE_ALLOWED` trong `src/tools/index.ts`), ẩn các công cụ chỉnh sửa patch/file nâng cao (`apply_patch`, `move_file`, `remove_file`), `git_push`, `gh_pr`, `kill_job` và các công cụ terminal thực thi lệnh (`terminal`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_resize`, `terminal_close`, `terminal_list`), nhưng **vẫn mở `terminal_wait_for`**.
 - **`agent`**: Mở **9 công cụ tích hợp** (`AGENT_ALLOWED`), tập trung vào `list_repos`, `apply_patch`, `run_typecheck`, `run_tests`, `git_status`, `git_diff` và bộ công cụ sub-agent.
 - **`safe`**: Tự động ẩn các công cụ có đánh dấu `destructive: true`, `openWorld: true` hoặc `git_push`.
 
@@ -320,7 +320,7 @@ Kết quả kiểm thử khi chạy với môi trường chuẩn:
 ```powershell
 $env:DEFAULT_BRANCH_PREFIX="agent/"; npm run smoke
 ```
-Trả về kết quả: **`190 pass, 0 fail`** trên tổng số 190 assertion của script `smoke.ts`.
+Trả về kết quả: **`192 pass, 0 fail`** trên tổng số 192 assertion của script `smoke.ts`.
 
 ### 9.2. Kết quả đo hiệu năng thực nghiệm (Benchmark)
 
@@ -339,6 +339,8 @@ Các số liệu dưới đây được đo lường thực nghiệm bằng `npx
 | List directory (`list_dir`) | **22.62 ms** | 23.88 ms | 1 | 100% |
 | Glob files (Warm Cache) | **0.05 ms** | 13.97 ms | 1 | 100% |
 | Terminal Foreground | **8.92 ms** | 10.01 ms | 1 | 100% |
+
+Kỷ nguyên Tree-sitter Symbol Index + Startup Prewarm + Micro-opts A/B/C (đo bằng `scripts/bench-symbol-index.ts` và `scripts/bench-cv-aut.ts`): symbol index cold build ~0.8s (đã chạy ngầm lúc server boot, không còn nằm trên đường request), disk load ~52ms, `trace_flow` warm ~1ms, `list_dir` warm ~1ms, `edit_file` tự trả snippet context quanh vết sửa (tiết kiệm 1 round-trip `read_file` cho mỗi lần sửa).
 
 ---
 
