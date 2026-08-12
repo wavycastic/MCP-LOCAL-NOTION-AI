@@ -174,3 +174,29 @@ export function applyReplacements(source: string, matches: TextMatch[], replacem
 	}
 	return result
 }
+
+/*
+ * Snippet vai dong quanh 1 offset trong text — tra kem trong response cua
+ * edit_file/multi_edit_file de agent verify ngay ma khong can goi read_file.
+ * Chi tach line khi duoc goi (tren duong ghi, khong phai duong doc nong).
+ */
+export function snippetAround(
+	text: string,
+	offset: number,
+	contextLines = 5,
+): { start_line: number; end_line: number; text: string } {
+	const lines = text.split("\n")
+	const clamped = Math.max(0, Math.min(offset, text.length))
+	let pos = 0
+	let lineIdx = lines.length - 1
+	for (let i = 0; i < lines.length; i++) {
+		pos += lines[i].length + 1
+		if (clamped < pos) {
+			lineIdx = i
+			break
+		}
+	}
+	const start = Math.max(0, lineIdx - contextLines)
+	const end = Math.min(lines.length, lineIdx + contextLines + 1)
+	return { start_line: start + 1, end_line: end, text: lines.slice(start, end).join("\n") }
+}

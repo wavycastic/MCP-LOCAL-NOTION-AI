@@ -1,8 +1,8 @@
 import { z } from "zod"
 import { MAX_WRITE_BYTES } from "../config.js"
 import { atomicWriteText } from "../files/atomicWrite.js"
-import { applyReplacements, findTextMatches } from "../files/matcher.js"
-import { readTextSnapshot } from "../files/text.js"
+import { applyReplacements, findTextMatches, snippetAround } from "../files/matcher.js"
+import { readTextSnapshotAsync } from "../files/text.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
@@ -35,7 +35,7 @@ export async function editFile(a: {
 	const repo = resolveRepo(a.repo)
 	const branch = await assertWritableBranch(repo)
 	const abs = safeResolve(repo.root, a.path)
-	const snap = readTextSnapshot(abs)
+	const snap = await readTextSnapshotAsync(abs)
 
 	if (a.expected_sha256) {
 		if (snap.sha256 !== a.expected_sha256) {
@@ -66,6 +66,11 @@ export async function editFile(a: {
 	const selectedMatches = a.replace_all ? matches : [matches[0]]
 	const nextText = applyReplacements(snap.text, selectedMatches, a.new_str)
 
+	// Offset match dau tien (nho nhat) giong nhau o text cu lan text moi:
+	// applyReplacements splice tu duoi len nen prefix truoc no khong doi. Tra kem
+	// context de agent verify ngay, khoi can goi them read_file.
+	const context = snippetAround(nextText, selectedMatches[0].start, 5)
+
 	const bytes = Buffer.byteLength(nextText, "utf8")
 	if (bytes > MAX_WRITE_BYTES) {
 		throw new Error(
@@ -92,6 +97,7 @@ export async function editFile(a: {
 		changed: writeRes.changed,
 		replacements: selectedMatches.length,
 		match_mode: matches[0].mode,
+		context,
 		bytes_before: snap.sizeBytes,
 		bytes_after: writeRes.bytes_after,
 		sha256_before: snap.sha256,

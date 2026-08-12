@@ -24,6 +24,9 @@ import { listDir, listDirSchema } from "./listDir.js"
 import { listRepos } from "./listRepos.js"
 import { moveFile, moveFileSchema } from "./moveFile.js"
 import { readManyFiles, readManyFilesSchema } from "./readManyFiles.js"
+import { featureContext, featureContextSchema } from "./featureContext.js"
+import { traceFlow, traceFlowSchema } from "./traceFlow.js"
+import { analyzeFeature, analyzeFeatureSchema } from "./analyzeFeature.js"
 import { globFiles, globFilesSchema } from "./globFiles.js"
 import { readFile, readFileSchema } from "./readFile.js"
 import { reindex, reindexSchema } from "./reindex.js"
@@ -72,6 +75,7 @@ function lockKey(args: any): string {
 
 export const CORE_ALLOWED = new Set([
 	"list_repos", "read_file", "read_many_files", "list_dir", "glob_files", "ripgrep",
+	"get_feature_context", "trace_flow", "analyze_feature",
 	"edit_file", "multi_edit_file", "create_file", "run_build", "run_tests", "run_lint",
 	"run_typecheck", "job_status", "git_status", "git_diff", "git_log", "git_branch",
 	"git_commit", "terminal_wait_for", "antigravity_spawn", "antigravity_poll",
@@ -121,50 +125,67 @@ function reg(s: McpServer, name: string, desc: string, schema: any, fn: Handler,
 	)
 }
 
+type ToolDef = { name: string; desc: string; schema: any; fn: Handler; opts?: Opts }
+
+/*
+ * Bang mo ta tool dung chung, tao MOT lan luc load module.
+ *
+ * Truoc day registerAll tao lai toan bo object schema/closure/opts cho MOI HTTP
+ * request (server stateless = 1 McpServer moi moi request). registerTool cua SDK
+ * van phai chay lai tung request, nhung phan cap phat object JS thua thi khong
+ * con — giam ap luc GC tren duong nong.
+ */
+const TOOL_DEFS: ToolDef[] = [
+	{ name: "list_repos", desc: "Liet ke cac repo dang phuc vu (ten, quyen ghi, toolchain). Goi dau tien khi chua biet ten repo — moi tool khac nhan tham so `repo` tu day.", schema: { refresh: z.boolean().optional().describe("Bo qua cache 10s, quet lai") }, fn: listRepos, opts: { readOnly: true } },
+	{ name: "read_file", desc: "Doc 1 file khi DA BIET chinh xac duong dan. Phan trang theo dong.", schema: readFileSchema, fn: readFile, opts: { readOnly: true } },
+	{ name: "read_many_files", desc: "Doc 1-50 file trong 1 call de giam round-trip.", schema: readManyFilesSchema, fn: readManyFiles, opts: { readOnly: true } },
+	{ name: "list_dir", desc: "Liet ke file/thu muc (bo qua node_modules, bin, obj, dist, .git).", schema: listDirSchema, fn: listDir, opts: { readOnly: true } },
+	{ name: "glob_files", desc: "Tim duong dan file theo glob pattern (vd: **/*.ts, src/**/*.json).", schema: globFilesSchema, fn: globFiles, opts: { readOnly: true } },
+	{ name: "ripgrep", desc: "Tim chuoi/regex trong codebase (all_repos=true: xuyen repo). De tim roi DOC LUON thi dung get_feature_context.", schema: ripgrepSchema, fn: ripgrep, opts: { readOnly: true } },
+	{ name: "get_feature_context", desc: "Gop tim+doc vao 1 call: nhap query (symbol/ham/chuoi loi), tra ve cac file lien quan xep theo so match. detail: L0 chi liet ke, L1 (mac dinh) outline+doan quanh match, L2 nguyen file. Lan luong goi thi dung trace_flow; tong hop ca hai dung analyze_feature. Cache theo git HEAD; refresh=true khi vua sua code. Biet san file thi dung read_file.", schema: featureContextSchema, fn: featureContext, opts: { readOnly: true } },
+	{ name: "trace_flow", desc: "Lan luong goi cua 1 symbol trong 1 call: dinh nghia (kem body), callers, callees (depth=2 lan them 1 tang, chi ten). Heuristic ripgrep, khong can LSP. Cache theo git HEAD. Can noi dung file thay vi luong goi thi dung get_feature_context.", schema: traceFlowSchema, fn: traceFlow, opts: { readOnly: true } },
+	{ name: "analyze_feature", desc: "1 CALL DUY NHAT cho cau hoi ve 1 chuc nang: gop tim file lien quan (nhu get_feature_context L1) + lan luong goi cua symbol chinh (nhu trace_flow), chay song song. Truyen `symbol` ro rang neu biet; khong thi tu doan tu query (chi nhan ten co chu hoa). Dung cho 'tinh nang X chay the nao'.", schema: analyzeFeatureSchema, fn: analyzeFeature, opts: { readOnly: true } },
+	{ name: "edit_file", desc: "Sua 1 vi tri trong file bang string-replace (old_str -> new_str). Response kem context ~11 dong quanh vet sua de verify ngay, khong can goi read_file lai.", schema: editFileSchema, fn: editFile },
+	{ name: "multi_edit_file", desc: "Sua nhieu vi tri trong cung 1 file, nguyen tu (rollback neu 1 vi tri loi). Response kem context quanh vet sua dau tien.", schema: multiEditFileSchema, fn: multiEditFile },
+	{ name: "apply_patch", desc: "Ap dung unified diff patch sua nhieu file cung luc (ho tro dry_run).", schema: applyPatchSchema, fn: applyPatch, opts: { destructive: true } },
+	{ name: "create_file", desc: "Tao file moi (tu choi ghi de file da ton tai).", schema: createFileSchema, fn: createFile },
+	{ name: "move_file", desc: "Doi ten hoac di chuyen file bang git mv. Giu nguyen lich su git cua file.", schema: moveFileSchema, fn: moveFile },
+	{ name: "remove_file", desc: "Xoa file da duoc git track bang git rm.", schema: removeFileSchema, fn: removeFile, opts: { destructive: true } },
+	{ name: "git_restore", desc: "Tra 1 file ve trang thai HEAD (khong nhan wildcard/thu muc).", schema: gitRestoreSchema, fn: gitRestore, opts: { destructive: true } },
+	{ name: "run_build", desc: "Chay lenh build mac dinh cua repo (npm run build, dotnet build, cargo build...).", schema: runBuildSchema, fn: runBuild, opts: { managesOwnLease: true } },
+	{ name: "run_tests", desc: "Chay bo test mac dinh cua repo (npm test, dotnet test...).", schema: runTestsSchema, fn: runTests, opts: { managesOwnLease: true } },
+	{ name: "run_lint", desc: "Chay linter mac dinh cua repo (eslint, cargo clippy...).", schema: runLintSchema, fn: runLint, opts: { managesOwnLease: true } },
+	{ name: "run_typecheck", desc: "Chay kiem tra kieu (tsc, mypy...).", schema: runTypecheckSchema, fn: runTypecheck, opts: { managesOwnLease: true } },
+	{ name: "job_status", desc: "Hoi ket qua cua 1 background job (build/test chay ngam).", schema: jobStatusSchema, fn: jobStatus, opts: { readOnly: true } },
+	{ name: "kill_job", desc: "Dung va giet ngay 1 background job dang chay ngam.", schema: killJobSchema, fn: killJob, opts: { destructive: true, managesOwnLease: true } },
+	{ name: "git_status", desc: "Xem trang thai git working tree (dirty/clean), staged files va branch hien tai.", schema: gitStatusSchema, fn: gitStatus, opts: { readOnly: true } },
+	{ name: "git_branch", desc: "Liet ke, tao moi hoac chuyen doi git branch trong repo.", schema: gitBranchSchema, fn: gitBranch },
+	{ name: "git_stash", desc: "Luu tam (stash) hoac khoi phuc cac thay doi chua commit trong working tree.", schema: gitStashSchema, fn: gitStash },
+	{ name: "git_diff", desc: "Xem noi dung thay doi (diff) cua working tree so voi HEAD hoac staged.", schema: gitDiffSchema, fn: gitDiff, opts: { readOnly: true } },
+	{ name: "git_log", desc: "Xem lich su cac commit gan day trong branch hien tai.", schema: gitLogSchema, fn: gitLog, opts: { readOnly: true } },
+	{ name: "git_blame", desc: "Xem nguoi commit va lich su chinh sua theo tung dong cua 1 file.", schema: gitBlameSchema, fn: gitBlame, opts: { readOnly: true } },
+	{ name: "git_commit", desc: "Tao 1 git commit moi cho cac thay doi trong repo.", schema: gitCommitSchema, fn: gitCommit },
+	{ name: "git_push", desc: "Push branch hien tai len git remote (khong cho force push).", schema: gitPushSchema, fn: gitPush },
+	{ name: "gh_pr", desc: "Quan ly, tao hoac xem GitHub Pull Request qua GitHub CLI.", schema: ghPrSchema, fn: ghPr },
+	{ name: "terminal", desc: "Chay 1 lenh terminal don le trong thu muc repo, tra output ngay.", schema: terminalSchema, fn: terminal, opts: { destructive: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_start", desc: "Mo phien shell PTY tuong tac keo dai (stateful) cho lenh dai han.", schema: terminalStartSchema, fn: terminalStart, opts: { destructive: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_write", desc: "Gui input/phim bam (Enter, Ctrl+C...) vao PTY session dang chay.", schema: terminalWriteSchema, fn: terminalWrite, opts: { destructive: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_read", desc: "Doc output moi tu PTY session theo byte cursor (khong lap lai output cu).", schema: terminalReadSchema, fn: terminalRead, opts: { readOnly: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_wait_for", desc: "Cho 1 chuoi/regex xuat hien trong output PTY session (long-poll).", schema: terminalWaitForSchema, fn: terminalWaitFor, opts: { readOnly: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_resize", desc: "Doi kich thuoc man hinh PTY session.", schema: terminalResizeSchema, fn: terminalResize, opts: { openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_close", desc: "Dong va dung phien PTY session.", schema: terminalCloseSchema, fn: terminalClose, opts: { destructive: true, openWorld: true, managesOwnLease: true } },
+	{ name: "terminal_list", desc: "Liet ke cac phien PTY session dang mo va trang thai.", schema: terminalListSchema, fn: terminalList, opts: { readOnly: true, openWorld: true, managesOwnLease: true } },
+	{ name: "reindex", desc: "Ep build lai tree-sitter symbol index cua repo (bo qua moi cache). Index thuong tu invalidate theo repoStamp — chi can goi khi muon lam tuoi chu dong.", schema: reindexSchema, fn: reindex },
+	{ name: "antigravity_spawn", desc: "UU TIEN cho tac vu phuc tap/nhieu buoc: khoi chay Antigravity sub-agent background. Sau khi goi BAT BUOC poll bang antigravity_poll toi khi done=true. Can chay lenh/ghi file thi dat skip_permissions=true. Khong dung cho thao tac don gian.", schema: antigravitySpawnSchema, fn: antigravitySpawn, opts: { openWorld: true, managesOwnLease: true } },
+	{ name: "antigravity_poll", desc: "Doc tien do + cau tra loi cua sub-agent Antigravity; done=true thi doc text/response, tiep tuc hoi bang antigravity_reply.", schema: antigravityPollSchema, fn: antigravityPoll, opts: { readOnly: true, openWorld: true, managesOwnLease: true } },
+	{ name: "antigravity_reply", desc: "Gui luot hoi thoai tiep theo vao phien Antigravity cu (cung conversation_id).", schema: antigravityReplySchema, fn: antigravityReply, opts: { openWorld: true, managesOwnLease: true } },
+	{ name: "antigravity_stop", desc: "Dung ngay 1 Sub-agent Antigravity dang chay.", schema: antigravityStopSchema, fn: antigravityStop, opts: { destructive: true, openWorld: true, managesOwnLease: true } },
+	{ name: "antigravity_list", desc: "Liet ke cac phien Sub-agent Antigravity dang hoat dong.", schema: antigravityListSchema, fn: antigravityList, opts: { readOnly: true, openWorld: true, managesOwnLease: true } },
+	{ name: "health_check", desc: "Kiem tra liveness cua server (uptime, PID, Node version).", schema: healthCheckSchema, fn: healthCheck, opts: { readOnly: true } },
+	{ name: "readiness_check", desc: "Kiem tra readiness cua server (config, repo registry validity).", schema: readinessCheckSchema, fn: readinessCheck, opts: { readOnly: true } },
+	{ name: "get_metrics", desc: "Lay thong ke metrics (so luong tool call, thoi gian thuc thi, PTY sessions).", schema: getMetricsSchema, fn: getMetrics, opts: { readOnly: true } },
+]
+
 export function registerAll(s: McpServer) {
-	reg(s, "list_repos", "GOI TRUOC TIEN KHI CHUA BIET TEN REPO: Liet ke danh sach repo server dang phuc vu, quyen ghi (write=true/false) va toolchain. Moi tool khac can tham so `repo` la ten lay tu day.", { refresh: z.boolean().optional().describe("Bo qua cache 10s, quet lai") }, listRepos, { readOnly: true })
-	reg(s, "read_file", "Doc 1 file cu the trong repo khi DA BIET CHINH XAC DUONG DAN (config, source code, markdown). Phan trang theo dong.", readFileSchema, readFile, { readOnly: true })
-	reg(s, "read_many_files", "Doc TU 1 DEN 50 FILE cung mot luc trong 1 call duy nhat. Dung khi can xem nhieu file nguon truoc khi refactor de giam round-trip.", readManyFilesSchema, readManyFiles, { readOnly: true })
-	reg(s, "list_dir", "Liet ke file/thu muc trong repo de xem cau truc cay thu muc. Bo qua node_modules, bin, obj, dist, .git.", listDirSchema, listDir, { readOnly: true })
-	reg(s, "glob_files", "Tim kiem duong dan file theo mau pattern (vd: **/*.ts, src/**/*.json). Dung khi can tim vi tri file theo extension hoac thu muc.", globFilesSchema, globFiles, { readOnly: true })
-	reg(s, "ripgrep", "Tim CHUOI VAN BAN / REGEX trong toan bo codebase (hoac trong tat ca repos voi all_repos=true). Dung de tim vi tri khai bao symbol hoac chuoi loi.", ripgrepSchema, ripgrep, { readOnly: true })
-	reg(s, "edit_file", "Sua DUY NHAT 1 VI TRI trong 1 file da ton tai bang string-replace (old_str -> new_str). Nhanh va an toan cho chinh sua nho.", editFileSchema, editFile)
-	reg(s, "multi_edit_file", "Sua NHIEU VI TRI KHONG LIEN TUC trong CUNG 1 FILE trong 1 call duy nhat (nguyen tu: atomic rollback neu 1 vi tri loi).", multiEditFileSchema, multiEditFile)
-	reg(s, "apply_patch", "Ap dung unified diff patch de SUA NHIEU FILE / NHIEU KHOI CODE cung luc trong 1 thao tac duy nhat.", applyPatchSchema, applyPatch, { destructive: true })
-	reg(s, "create_file", "Tao MOI 1 file hoan toan voi noi dung ban dau. Tu choi neu file da ton tai (khong ghi de).", createFileSchema, createFile)
-	reg(s, "move_file", "Doi ten hoac di chuyen file bang git mv. Giu nguyen lich su git cua file.", moveFileSchema, moveFile)
-	reg(s, "remove_file", "Xoa file da duoc git track bang git rm.", removeFileSchema, removeFile, { destructive: true })
-	reg(s, "git_restore", "Hoan tac va tra 1 file cu the ve trang thai commit HEAD ban dau. Tu choi wildcard va thu muc.", gitRestoreSchema, gitRestore, { destructive: true })
-	reg(s, "run_build", "Chay lenh build mac dinh cua repo (npm run build, dotnet build, cargo build...).", runBuildSchema, runBuild, { managesOwnLease: true })
-	reg(s, "run_tests", "Chay bo test mac dinh cua repo (npm test, dotnet test...).", runTestsSchema, runTests, { managesOwnLease: true })
-	reg(s, "run_lint", "Chay linter mac dinh cua repo (eslint, cargo clippy...).", runLintSchema, runLint, { managesOwnLease: true })
-	reg(s, "run_typecheck", "Chay kiem tra kieu (tsc, mypy...).", runTypecheckSchema, runTypecheck, { managesOwnLease: true })
-	reg(s, "job_status", "Hoi ket qua cua 1 background job (build/test chay ngam).", jobStatusSchema, jobStatus, { readOnly: true })
-	reg(s, "kill_job", "Dung va giet ngay 1 background job dang chay ngam.", killJobSchema, killJob, { destructive: true, managesOwnLease: true })
-	reg(s, "git_status", "Xem trang thai git working tree (dirty/clean), staged files va branch hien tai.", gitStatusSchema, gitStatus, { readOnly: true })
-	reg(s, "git_branch", "Liet ke, tao moi hoac chuyen doi git branch trong repo.", gitBranchSchema, gitBranch)
-	reg(s, "git_stash", "Luu tam (stash) hoac khoi phuc cac thay doi chua commit trong working tree.", gitStashSchema, gitStash)
-	reg(s, "git_diff", "Xem noi dung thay doi (diff) cua working tree so voi HEAD hoac staged.", gitDiffSchema, gitDiff, { readOnly: true })
-	reg(s, "git_log", "Xem lich su cac commit gan day trong branch hien tai.", gitLogSchema, gitLog, { readOnly: true })
-	reg(s, "git_blame", "Xem nguoi commit va lich su chinh sua theo tung dong cua 1 file.", gitBlameSchema, gitBlame, { readOnly: true })
-	reg(s, "git_commit", "Tao 1 git commit moi cho cac thay doi trong repo.", gitCommitSchema, gitCommit)
-	reg(s, "git_push", "Push branch hien tai len git remote (khong cho force push).", gitPushSchema, gitPush)
-	reg(s, "gh_pr", "Quan ly, tao hoac xem GitHub Pull Request qua GitHub CLI.", ghPrSchema, ghPr)
-	reg(s, "terminal", "Chay 1 lenh terminal don le (stateless command) trong thu muc repo va tra ve output ngay.", terminalSchema, terminal, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_start", "Mo 1 phien Shell PTY tuong tac keo dai (stateful PTY session) de chay cac lenh dai han.", terminalStartSchema, terminalStart, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_write", "Gui raw input/phim bam (Enter, Ctrl+C...) vao PTY session dang chay.", terminalWriteSchema, terminalWrite, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_read", "Doc luong output moi tu PTY session bang byte cursor (khong lap lai output cu).", terminalReadSchema, terminalRead, { readOnly: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_wait_for", "Cho 1 chuoi/regex xuat hien trong output cua PTY session (long-poll trong 1 call).", terminalWaitForSchema, terminalWaitFor, { readOnly: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_resize", "Doi kich thuoc man hinh PTY session.", terminalResizeSchema, terminalResize, { openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_close", "Dong va dung phien PTY session.", terminalCloseSchema, terminalClose, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "terminal_list", "Liet ke cac phien PTY session dang mo va trang thai.", terminalListSchema, terminalList, { readOnly: true, openWorld: true, managesOwnLease: true })
-	reg(s, "reindex", "Chay lai lenh reindex cua repo.", reindexSchema, reindex)
-	reg(s, "antigravity_spawn", "UU TIEN CHO TAC VU PHUC TAP, REFACTOR NHIEU FILE, DIEU TRA CODEBASE HOAC CONG VIEC NHIEU BUOC. Khoi chay Antigravity Sub-agent trong background va hien thi Live Viewer cho nguoi dung. Sau khi goi, BAT BUOC dung antigravity_poll den khi done=true. Tac vu can chay lenh hoac sua file phai dat skip_permissions=true. Khong dung cho thao tac don gian ma tool truc tiep xu ly nhanh hon.", antigravitySpawnSchema, antigravitySpawn, { openWorld: true, managesOwnLease: true })
-	reg(s, "antigravity_poll", "Doc tien do va NOI DUNG CAU TRA LOI (response) tu Sub-agent Antigravity. Khi done=true, doc truong text/response; neu can tiep tuc hoi thoai, goi antigravity_reply voi cung conversation_id.", antigravityPollSchema, antigravityPoll, { readOnly: true, openWorld: true, managesOwnLease: true })
-	reg(s, "antigravity_reply", "Gui 1 luot hoi thoai tiep theo vao phien Antigravity cu (--conversation) khi luot truoc da done=true.", antigravityReplySchema, antigravityReply, { openWorld: true, managesOwnLease: true })
-	reg(s, "antigravity_stop", "Dung ngay 1 Sub-agent Antigravity dang chay.", antigravityStopSchema, antigravityStop, { destructive: true, openWorld: true, managesOwnLease: true })
-	reg(s, "antigravity_list", "Liet ke cac phien Sub-agent Antigravity dang hoat dong.", antigravityListSchema, antigravityList, { readOnly: true, openWorld: true, managesOwnLease: true })
-	reg(s, "health_check", "Kiem tra liveness cua server (uptime, PID, Node version).", healthCheckSchema, healthCheck, { readOnly: true })
-	reg(s, "readiness_check", "Kiem tra readiness cua server (config, repo registry validity).", readinessCheckSchema, readinessCheck, { readOnly: true })
-	reg(s, "get_metrics", "Lay thong ke metrics (so luong tool call, thoi gian thuc thi, PTY sessions).", getMetricsSchema, getMetrics, { readOnly: true })
+	for (const d of TOOL_DEFS) reg(s, d.name, d.desc, d.schema, d.fn, d.opts)
 }

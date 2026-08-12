@@ -1,8 +1,8 @@
 import { z } from "zod"
 import { MAX_WRITE_BYTES } from "../config.js"
 import { atomicWriteText } from "../files/atomicWrite.js"
-import { applyReplacements, findTextMatches, type MatchMode } from "../files/matcher.js"
-import { readTextSnapshot } from "../files/text.js"
+import { applyReplacements, findTextMatches, snippetAround, type MatchMode } from "../files/matcher.js"
+import { readTextSnapshotAsync } from "../files/text.js"
 import { assertWritableBranch } from "../git.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
@@ -43,7 +43,7 @@ export async function multiEditFile(a: {
 	const repo = resolveRepo(a.repo)
 	const branch = await assertWritableBranch(repo)
 	const abs = safeResolve(repo.root, a.path)
-	const snap = readTextSnapshot(abs)
+	const snap = await readTextSnapshotAsync(abs)
 
 	if (a.expected_sha256) {
 		if (snap.sha256 !== a.expected_sha256) {
@@ -54,6 +54,9 @@ export async function multiEditFile(a: {
 	}
 
 	let currentText = snap.text
+	// Vi tri edit dau tien trong text CUOI CUNG: moi replacement sau do ma dung
+	// TRUOC no se day no di mot doan dung bang delta do dai cua replacement ay.
+	let firstAt: number | null = null
 	const editResults: SingleEditResult[] = []
 
 	for (let i = 0; i < a.edits.length; i++) {
@@ -79,6 +82,10 @@ export async function multiEditFile(a: {
 		}
 
 		const selectedMatches = edit.replace_all ? matches : [matches[0]]
+		for (const m of selectedMatches) {
+			if (firstAt !== null && m.start < firstAt) firstAt += edit.new_str.length - (m.end - m.start)
+		}
+		if (firstAt === null) firstAt = selectedMatches[0].start
 		currentText = applyReplacements(currentText, selectedMatches, edit.new_str)
 
 		editResults.push({
@@ -114,6 +121,8 @@ export async function multiEditFile(a: {
 		changed: writeRes.changed,
 		total_edits: a.edits.length,
 		edits: editResults,
+		// Snippet quanh vet sua dau tien — verify ngay, khong can goi read_file lai.
+		context: snippetAround(currentText, firstAt ?? 0, 5),
 		bytes_before: snap.sizeBytes,
 		bytes_after: writeRes.bytes_after,
 		sha256_before: snap.sha256,
