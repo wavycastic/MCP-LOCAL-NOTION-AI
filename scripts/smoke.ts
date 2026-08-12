@@ -888,7 +888,7 @@ for (let i = 0; i < 100 && !ptyCombined.includes("PTY_INTERACTIVE_OK"); i++) {
 }
 ok("terminal_write/read tuong tac voi shell dang chay", ptyCombined.includes("PTY_INTERACTIVE_OK"), ptyCombined)
 
-await sleep(50)
+await sleep(200)
 const drainRead: any = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: ptyRead.next_cursor })
 const firstCursor = drainRead.next_cursor
 await terminalWrite({ repo: "demo", session_id: ptySession.id, data: "echo PTY_INCREMENTAL_OK\r" })
