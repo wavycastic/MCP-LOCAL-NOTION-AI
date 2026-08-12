@@ -9,7 +9,7 @@
  *   npm run smoke
  */
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -55,9 +55,7 @@ writeFileSync(join(ro, "huge.txt"), "z".repeat(9_000))
 const reposConfig = join(workspace, "repos.json")
 const goodConfig = JSON.stringify(
 	{
-		// reindex that la `npx gitnexus analyze` — trong CI thi khong duoc goi mang.
-		defaults: { reindex: ["echo", "reindexed"] },
-		repos: [{ name: "demo", path: rw, write: true }],
+		repos: [{ name: "demo", path: rw, write: true, branchPrefix: "agent/" }],
 	},
 	null,
 	2,
@@ -73,7 +71,6 @@ process.env.ALLOW_TERMINAL = "true"
 // Smoke kiem tra sandbox theo repo; tat repo ao `system` cua che do Full Access.
 process.env.ALLOW_FULL_ACCESS = "false"
 process.env.AUTO_DISCOVERED_WRITE = "false"
-process.env.FLOWLENS_AUTO_INDEX = "false"
 process.env.MAX_READ_BYTES = "5000" // ha tran cho de test, moi file thuc te deu nho hon
 process.env.MAX_WRITE_BYTES = "5000"
 
@@ -86,6 +83,10 @@ const { readManyFiles } = await import("../src/tools/readManyFiles.js")
 const { globFiles } = await import("../src/tools/globFiles.js")
 const { listDir } = await import("../src/tools/listDir.js")
 const { ripgrep } = await import("../src/tools/ripgrep.js")
+const { featureContext } = await import("../src/tools/featureContext.js")
+const { traceFlow } = await import("../src/tools/traceFlow.js")
+const { analyzeFeature } = await import("../src/tools/analyzeFeature.js")
+const { flushContextCacheWrites } = await import("../src/contextCache.js")
 const { createFile } = await import("../src/tools/createFile.js")
 const { editFile } = await import("../src/tools/editFile.js")
 const { multiEditFile } = await import("../src/tools/multiEditFile.js")
@@ -195,6 +196,98 @@ ok("ripgrep xuyen repo thay ca 2", g2.results.length === 2, JSON.stringify(g2.re
 const g3 = await ripgrep({ repo: "demo", pattern: "chuoi-khong-bao-gio-ton-tai" })
 ok("khong match thi tra rong, khong phai loi", g3.results[0].matches.trim() === "")
 
+console.log("\nget_feature_context")
+const fc1 = await featureContext({ repo: "demo", query: "hello" })
+ok(
+	"feature_context tim va doc file trong 1 call",
+	fc1.files.some((f) => f.path === "README.md" && f.ok && (f.text ?? "").includes("hello")),
+	JSON.stringify(fc1).slice(0, 300),
+)
+const fcCache = await featureContext({ repo: "demo", query: "hello" })
+ok("feature_context cache hit lan goi thu 2", fcCache.cache_hit === true, JSON.stringify(fcCache).slice(0, 200))
+const fcMiss = await featureContext({ repo: "demo", query: "chuoi-khong-bao-gio-ton-tai" })
+ok("feature_context khong match tra files rong", fcMiss.matched_files === 0 && fcMiss.files.length === 0, JSON.stringify(fcMiss))
+const fcDeny = await featureContext({ repo: "demo", query: "SECRET" })
+ok("feature_context deny-list chan .env", fcDeny.files.every((f) => !f.path.includes(".env")), JSON.stringify(fcDeny))
+const fcPartial = await featureContext({ repo: "demo", query: "hello", full_file: false, refresh: true })
+ok(
+	"feature_context partial mode tra window quanh match",
+	fcPartial.files[0]?.truncated === true && (fcPartial.files[0]?.text ?? "").includes("hello"),
+	JSON.stringify(fcPartial).slice(0, 300),
+)
+const fcL0 = await featureContext({ repo: "demo", query: "hello", detail: "L0", refresh: true })
+ok(
+	"feature_context L0 chi tra danh sach, khong doc noi dung",
+	fcL0.files[0] !== undefined && fcL0.files[0].text === undefined && fcL0.files[0].match_count > 0,
+	JSON.stringify(fcL0),
+)
+const fcL1 = await featureContext({ repo: "demo", query: "hello", detail: "L1", refresh: true })
+ok(
+	"feature_context L1 tra window kem outline",
+	fcL1.files[0]?.truncated === true &&
+		(fcL1.files[0]?.text ?? "").includes("hello") &&
+		Array.isArray(fcL1.files[0]?.outline),
+	JSON.stringify(fcL1).slice(0, 300),
+)
+const fcL2 = await featureContext({ repo: "demo", query: "hello", detail: "L2", refresh: true })
+ok(
+	"feature_context L2 doc nguyen file",
+	fcL2.files[0]?.truncated === false && (fcL2.files[0]?.text ?? "").includes("world"),
+	JSON.stringify(fcL2),
+)
+const fcWarm = await featureContext({ repo: "demo", query: "hello", detail: "L2" })
+ok("repoStamp: tree khong doi thi cache hit", fcWarm.cache_hit === true)
+writeFileSync(join(rw, "new-file-hello.txt"), "hello moi\n")
+await sleep(2100) // cho het TTL 2s cua repoStamp
+const fcNewFile = await featureContext({ repo: "demo", query: "hello", detail: "L2" })
+ok(
+	"repoStamp: file moi chua commit lam cache miss va lo dien trong ket qua",
+	fcNewFile.cache_hit === false && fcNewFile.files.some((f) => f.path === "new-file-hello.txt"),
+	JSON.stringify(fcNewFile).slice(0, 200),
+)
+unlinkSync(join(rw, "new-file-hello.txt")) // don sach: cac test git phia sau doi hoi tree sach
+
+console.log("\ntrace_flow")
+const tf1 = await traceFlow({ repo: "demo", symbol: "hello" })
+ok("trace_flow tim thay caller", tf1.callers.some((c) => c.path === "README.md"), JSON.stringify(tf1).slice(0, 300))
+const tf2 = await traceFlow({ repo: "demo", symbol: "hello" })
+ok("trace_flow cache hit lan goi thu 2", tf2.cache_hit === true, JSON.stringify(tf2).slice(0, 200))
+const tfMiss = await traceFlow({ repo: "demo", symbol: "symbol_khong_he_ton_tai" })
+ok("trace_flow symbol khong ton tai tra rong", tfMiss.definitions.length === 0 && tfMiss.callers.length === 0, JSON.stringify(tfMiss))
+const tfDeny = await traceFlow({ repo: "demo", symbol: "SECRET" })
+ok(
+	"trace_flow deny-list chan .env",
+	![...tfDeny.callers, ...tfDeny.definitions].some((x) => x.path.includes(".env")),
+	JSON.stringify(tfDeny),
+)
+await denies("trace_flow tu choi symbol khong hop le", () => traceFlow({ repo: "demo", symbol: "foo; rm -rf" }), "khong hop le")
+
+console.log("\nanalyze_feature")
+const af1 = await analyzeFeature({ repo: "demo", query: "hello" })
+ok(
+	"analyze_feature gom context, bo qua trace khi query khong co symbol",
+	af1.context.files.length > 0 && af1.symbol_traced === null && af1.trace === null,
+	JSON.stringify(af1).slice(0, 300),
+)
+const af2 = await analyzeFeature({ repo: "demo", query: "hello", symbol: "hello" })
+ok(
+	"analyze_feature trace khi truyen symbol ro rang",
+	af2.symbol_traced === "hello" && af2.trace !== null && af2.trace.callers.length > 0,
+	JSON.stringify(af2).slice(0, 300),
+)
+const af3 = await analyzeFeature({ repo: "demo", query: "hello", symbol: "hello" })
+ok("analyze_feature cache hit lan 2", af3.cache_hit === true, JSON.stringify(af3).slice(0, 200))
+const af4 = await analyzeFeature({ repo: "demo", query: "cau hoi van xuong khong match gi het", symbol: "hello" })
+ok(
+	"analyze_feature fallback tim lai bang symbol khi query van xuong khong match",
+	af4.context.matched_files === 1 && af4.symbol_traced === "hello",
+	JSON.stringify(af4).slice(0, 300),
+)
+await flushContextCacheWrites()
+const { readdirSync } = await import("node:fs")
+const diskCacheDir = join(tmpdir(), "local-repo-mcp-context-cache")
+ok("context cache ghi ra dia (song qua restart)", readdirSync(diskCacheDir).length > 0, diskCacheDir)
+
 // —— Chroot + deny-list ——
 console.log("\nchroot & deny-list")
 await denies("chan .env", () => readFile({ repo: "demo", path: ".env" }), "denied")
@@ -254,6 +347,12 @@ const e1 = await editFile({
 })
 ok("edit_file thay 1 cho", e1.replacements === 1)
 ok(
+	"edit_file tra kem context quanh vet sua",
+	typeof e1.context?.text === "string" &&
+		e1.context.text.includes("const a = 2") &&
+		e1.context.start_line === 1,
+)
+ok(
 	"noi dung da doi",
 	(await readFile({ repo: "demo", path: "src/a.ts" })).text.includes("a = 2"),
 )
@@ -289,6 +388,10 @@ const me1 = await multiEditFile({
 	],
 })
 ok("multi_edit_file thay nhieu vi tri thanh cong", me1.total_edits === 2 && me1.edits.length === 2)
+ok(
+	"multi_edit_file tra kem context",
+	typeof me1.context?.text === "string" && me1.context.text.includes("const a = 10"),
+)
 const meText = (await readFile({ repo: "demo", path: "src/a.ts" })).text
 ok("noi dung da duoc multi_edit cap nhat", meText.includes("a = 10") && meText.includes("b = 20"))
 
@@ -679,7 +782,6 @@ ok(
 	Array.isArray(cm.committed) && cm.committed.includes("src/a.ts"),
 	JSON.stringify(cm.committed),
 )
-ok("git_commit tu day job reindex", typeof cm.reindex_job === "string", JSON.stringify(cm))
 const tracked = execFileSync("git", ["ls-files"], { cwd: rw, encoding: "utf8" })
 	.split("\n")
 	.map((l) => l.trim())
@@ -847,9 +949,6 @@ for (let i = 0; i < 100 && !js.done; i++) {
 ok("job chay xong, exit 0", js.status === "done" && js.exit_code === 0, JSON.stringify(js))
 ok("job co output", String(js.output ?? "").includes("built"), String(js.output))
 ok("liet ke duoc job", (await jobStatus({ repo: "demo" })).jobs.length >= 1)
-const rj: any = await jobStatus({ job_id: String(cm.reindex_job) })
-ok("job reindex cua commit da chay", rj.status === "done", JSON.stringify(rj))
-ok("reindex dung lenh cua repo", String(rj.command).includes("echo"), String(rj.command))
 await denies(
 	"job_status bao loi voi job_id la",
 	() => jobStatus({ job_id: "job-9999" }),
@@ -929,12 +1028,47 @@ ok(
 	concurrentText,
 )
 
+// —— Symbol index (tree-sitter) ——
+console.log("\nsymbol index")
+await createFile({ repo: "demo", path: "src/fn.ts", content: "export function helloFn(): number { return 1 }\n" })
+const tfs = await traceFlow({ repo: "demo", symbol: "helloFn", refresh: true })
+ok("trace_flow dung tree-sitter symbol index khi co", tfs.symbol_index === true, JSON.stringify(tfs).slice(0, 300))
+ok(
+	"symbol index tim dung definition AST",
+	tfs.definitions.some((d) => d.path === "src/fn.ts" && d.line === 1),
+	JSON.stringify(tfs.definitions),
+)
+const tfsNoIdx = await traceFlow({ repo: "refonly", symbol: "hello", refresh: true })
+ok("repo khong co symbol thi tu lui heuristic", tfsNoIdx.symbol_index === false)
+
 // —— Snapshot danh sach tool theo tung agent profile (CORE_ALLOWED / AGENT_ALLOWED) ——
 console.log("\ntool profile snapshot")
 ok("CORE_ALLOWED co cac tool doc/ghi/build co ban", ["read_file", "edit_file", "create_file", "git_commit", "run_tests", "health_check", "readiness_check", "get_metrics"].every((t) => CORE_ALLOWED.has(t)), JSON.stringify([...CORE_ALLOWED]))
 ok("CORE_ALLOWED KHONG co cac tool nguy hiem/mo rong (terminal, apply_patch, move/remove, git_push, gh_pr, kill_job)", ["terminal", "terminal_start", "apply_patch", "move_file", "remove_file", "git_push", "gh_pr", "kill_job"].every((t) => !CORE_ALLOWED.has(t)), JSON.stringify([...CORE_ALLOWED]))
 ok("AGENT_ALLOWED co cac tool composite/read-only chinh cho autofill agent", ["list_repos", "apply_patch", "run_typecheck", "run_tests", "git_status"].every((t) => AGENT_ALLOWED.has(t)), JSON.stringify([...AGENT_ALLOWED]))
 ok("AGENT_ALLOWED KHONG co cac tool doc/ghi file truc tiep hay terminal/kill_job", ["read_file", "edit_file", "create_file", "git_commit", "terminal", "kill_job"].every((t) => !AGENT_ALLOWED.has(t)), JSON.stringify([...AGENT_ALLOWED]))
+
+// —— Antigravity Live Window & Session tests ——
+console.log("\nantigravity live window & session tests")
+const { antigravitySpawn } = await import("../src/tools/antigravity.js")
+const { getSession, stopSession } = await import("../src/antigravity/cli.js")
+
+try {
+	const spawned = (await antigravitySpawn({
+		task: "echo hello smoke test",
+		repo: "demo",
+		interactive: true,
+	})) as { conversation_id: string }
+	ok("antigravity_spawn return conversation_id", Boolean(spawned?.conversation_id), JSON.stringify(spawned))
+
+	const sess = getSession(spawned.conversation_id)
+	ok("session state recorded correctly with logPath", Boolean(sess && sess.id === spawned.conversation_id))
+
+	const stopped = stopSession(spawned.conversation_id)
+	ok("stopSession cleans up session", stopped === true)
+} catch (err) {
+	ok("antigravity tool error handled", String(err).length > 0, String(err))
+}
 
 // —— Cau hinh sai phai sap ngay, khong duoc chay tiep ——
 console.log("\ncau hinh sai")

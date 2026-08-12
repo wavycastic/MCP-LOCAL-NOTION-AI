@@ -44,6 +44,7 @@ const { readFile } = await import("../src/tools/readFile.js")
 const { readManyFiles } = await import("../src/tools/readManyFiles.js")
 const { listDir } = await import("../src/tools/listDir.js")
 const { globFiles } = await import("../src/tools/globFiles.js")
+const { featureContext } = await import("../src/tools/featureContext.js")
 const { terminal } = await import("../src/tools/terminal.js")
 
 type MetricResult = {
@@ -211,6 +212,23 @@ results.push(
 	}),
 )
 
+// Case 4C: Feature context cold (1 x get_feature_context)
+results.push(
+	await runBench("Case 4C: Feature context cold (get_feature_context)", 20, 1, async () => {
+		const res = await featureContext({ repo: "bench", query: "val_", refresh: true })
+		return JSON.stringify(res).length
+	}),
+)
+
+// Case 4D: Feature context warm cache
+results.push(
+	await runBench("Case 4D: Feature context warm cache (get_feature_context)", 20, 1, async () => {
+		await featureContext({ repo: "bench", query: "val_" })
+		const res = await featureContext({ repo: "bench", query: "val_" })
+		return JSON.stringify(res).length
+	}),
+)
+
 // Case 5A: Manual recursive list_dir
 results.push(
 	await runBench("Case 5A: List dir (list_dir)", 20, 1, async () => {
@@ -264,3 +282,40 @@ for (const r of results) {
 		`| ${r.name} | ${r.medianMs}ms | ${r.p95Ms}ms | ${r.mcpRoundTrips} | ${r.totalBytes} B | ${r.successRate}% |`,
 	)
 }
+
+/*
+ * Regression gate: exit 1 khi median vuot nguong hoac success < 100%.
+ * Nguong ~2x so lieu sau toi uu P0 + symbol index — du rong cho may cham,
+ * du chat de chan regression that. Chay o CI tren moi PR.
+ */
+const THRESHOLDS_MS: Record<string, number> = {
+	"Case 1: Single edit (edit_file)": 10,
+	"Case 2A: 10 edits (10 x edit_file)": 40,
+	"Case 2B: 10 edits (1 x multi_edit_file)": 10,
+	"Case 3A: 10 files (10 x edit_file)": 40,
+	"Case 3B: 10 files (1 x apply_patch)": 50,
+	"Case 4A: Read 10 files (10 x read_file)": 20,
+	"Case 4B: Read 10 files (1 x read_many_files)": 20,
+	"Case 4C: Feature context cold (get_feature_context)": 90,
+	"Case 4D: Feature context warm cache (get_feature_context)": 20,
+	"Case 5A: List dir (list_dir)": 15,
+	"Case 5B: Glob files cold (glob_files)": 40,
+	"Case 5C: Glob files warm cache": 10,
+	"Case 6A: Terminal foreground": 40,
+	"Case 6B: Terminal background": 5,
+}
+
+let failed = false
+for (const r of results) {
+	const limit = THRESHOLDS_MS[r.name]
+	if (limit === undefined) continue
+	if (r.successRate < 100 || r.medianMs > limit) {
+		failed = true
+		console.error(`REGRESSION: ${r.name} — median ${r.medianMs}ms (nguong ${limit}ms), success ${r.successRate}%`)
+	}
+}
+if (failed) {
+	console.error("\nBenchmark gate FAILED")
+	process.exit(1)
+}
+console.log("\nBenchmark gate PASSED — moi case deu trong nguong")
