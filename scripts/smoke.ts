@@ -981,7 +981,10 @@ writeFileSync(
 		"const { spawn } = require('node:child_process')",
 		"const path = require('node:path')",
 		"const heartbeatPath = path.join(__dirname, 'heartbeat.txt')",
-		"spawn(process.execPath, ['-e', `const fs=require('node:fs');setInterval(()=>{try{fs.appendFileSync(${JSON.stringify(heartbeatPath)},'x')}catch(e){}},50)`], { stdio: 'ignore' })",
+		"const child = spawn(process.execPath, ['-e', `const fs=require('node:fs');setInterval(()=>{try{fs.appendFileSync(${JSON.stringify(heartbeatPath)},'x')}catch(e){}},50)`], { stdio: 'ignore' })",
+		"process.on('exit', () => { try { child.kill('SIGKILL') } catch {} })",
+		"process.on('SIGTERM', () => { try { child.kill('SIGKILL') } catch {}; process.exit(0) })",
+		"process.on('SIGINT', () => { try { child.kill('SIGKILL') } catch {}; process.exit(0) })",
 		"setInterval(() => {}, 1000)",
 	].join("\n") + "\n",
 )

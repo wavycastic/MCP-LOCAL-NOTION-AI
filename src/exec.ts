@@ -182,8 +182,7 @@ export function killTree(p: ChildProcess): void {
 		}
 	} else {
 		try {
-			spawn("pkill", ["-P", String(p.pid)], { stdio: "ignore" })
-			try { process.kill(-p.pid, "SIGKILL") } catch {}
+			spawn("pkill", ["-9", "-P", String(p.pid)], { stdio: "ignore" })
 		} catch {}
 	}
 	try {
