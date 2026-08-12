@@ -877,25 +877,28 @@ ok("terminal env sanitizer loai bo MCP_TOKEN va secret variables", sanitizedTerm
 const ptyShell = process.platform === "win32" ? "cmd" : "sh"
 const ptySession = await terminalStart({ repo: "demo", shell: ptyShell, cols: 80, rows: 24 })
 ok("terminal_start mo interactive PTY", ptySession.status === "running" && ptySession.pid > 0, JSON.stringify(ptySession))
+await sleep(300)
+let initialDrain: any = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: 0 })
+
 await terminalWrite({ repo: "demo", session_id: ptySession.id, data: "echo PTY_INTERACTIVE_OK\r" })
 
-let ptyRead: any = { output: "", next_cursor: 0, status: "running" }
+let ptyRead: any = { output: "", next_cursor: initialDrain.next_cursor, status: "running" }
 let ptyCombined = ""
 for (let i = 0; i < 100 && !ptyCombined.includes("PTY_INTERACTIVE_OK"); i++) {
-	await sleep(20)
+	await sleep(30)
 	ptyRead = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: ptyRead.next_cursor })
 	ptyCombined += ptyRead.output
 }
 ok("terminal_write/read tuong tac voi shell dang chay", ptyCombined.includes("PTY_INTERACTIVE_OK"), ptyCombined)
 
-await sleep(200)
+await sleep(300)
 const drainRead: any = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: ptyRead.next_cursor })
 const firstCursor = drainRead.next_cursor
 await terminalWrite({ repo: "demo", session_id: ptySession.id, data: "echo PTY_INCREMENTAL_OK\r" })
 let incremental = ""
 let nextCursor = firstCursor
 for (let i = 0; i < 100 && !incremental.includes("PTY_INCREMENTAL_OK"); i++) {
-	await sleep(20)
+	await sleep(30)
 	const part: any = await terminalRead({ repo: "demo", session_id: ptySession.id, cursor: nextCursor })
 	incremental += part.output
 	nextCursor = part.next_cursor
