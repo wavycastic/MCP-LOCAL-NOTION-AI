@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { EXEC_TIMEOUT_MS, MAX_OUTPUT } from "./config.js"
@@ -182,7 +182,7 @@ export function killTree(p: ChildProcess): void {
 		}
 	} else {
 		try {
-			spawn("pkill", ["-9", "-P", String(p.pid)], { stdio: "ignore" })
+			spawnSync("pkill", ["-9", "-P", String(p.pid)], { stdio: "ignore" })
 		} catch {}
 	}
 	try {
