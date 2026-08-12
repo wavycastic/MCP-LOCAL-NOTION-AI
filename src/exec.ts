@@ -171,7 +171,8 @@ export function killTree(p: ChildProcess): void {
 		p.stdout?.destroy()
 		p.stderr?.destroy()
 	} catch {}
-	if (process.platform === "win32" && p.pid) {
+	if (!p.pid) return
+	if (process.platform === "win32") {
 		try {
 			const k = spawn("taskkill", ["/pid", String(p.pid), "/T", "/F"], { stdio: "ignore" })
 			k.on("error", () => p.kill("SIGKILL"))
@@ -179,6 +180,11 @@ export function killTree(p: ChildProcess): void {
 		} catch {
 			// fallthrough
 		}
+	} else {
+		try {
+			spawn("pkill", ["-P", String(p.pid)], { stdio: "ignore" })
+			try { process.kill(-p.pid, "SIGKILL") } catch {}
+		} catch {}
 	}
 	try {
 		p.kill("SIGKILL")

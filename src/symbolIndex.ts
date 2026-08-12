@@ -300,7 +300,7 @@ async function listIndexableFiles(root: string): Promise<string[]> {
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e)
 		if (!msg.includes("ENOENT")) throw e
-		const r = await run(["git", "ls-files"], { cwd: root, timeoutMs: 30_000 })
+		const r = await run(["git", "ls-files", "-co", "--exclude-standard"], { cwd: root, timeoutMs: 30_000 })
 		return pick(r.stdout)
 	}
 }
