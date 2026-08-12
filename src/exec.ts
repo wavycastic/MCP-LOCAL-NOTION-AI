@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { EXEC_TIMEOUT_MS, MAX_OUTPUT } from "./config.js"
@@ -181,8 +181,20 @@ export function killTree(p: ChildProcess): void {
 			// fallthrough
 		}
 	} else {
+		// POSIX: run() spawn detached=true nen p la leader cua process group moi.
+		// Kill CA NHOM bang -pid: con chau ke thua group nen cung nhan SIGKILL —
+		// khong con loi thoat qua re-parent ve PID 1 nhu pkill -P (chi diet con
+		// TRUC TIEP; chau doi PPID=1 ngay khi cha chet la thoat sach). ESRCH khi
+		// group da sach thi bo qua; p.kill ben duoi du phong cho truong hop hiem
+		// gap tien trinh khong qua run() (khong detached).
 		try {
-			spawnSync("pkill", ["-9", "-P", String(p.pid)], { stdio: "ignore" })
+			process.kill(-p.pid, "SIGKILL")
+		} catch {}
+		try {
+			spawn("pkill", ["-9", "-g", String(p.pid)], { stdio: "ignore" })
+		} catch {}
+		try {
+			spawn("pkill", ["-9", "-P", String(p.pid)], { stdio: "ignore" })
 		} catch {}
 	}
 	try {
@@ -233,7 +245,11 @@ export function run(
 	const maxOutput = Number.isFinite(configuredLimit) ? Math.max(0, Math.floor(configuredLimit)) : MAX_OUTPUT
 
 	return new Promise((res, rej) => {
-		const p = spawn(cmd, args, { cwd: cwd0, shell: false, stdio: ["ignore", "pipe", "pipe"], env: childEnv(opts.env) })
+		// POSIX: detached=true -> child la leader cua process group moi (setsid),
+		// de killTree SIGKILL duoc CA NHOM (-pid), diet ca con chau. Windows giu
+		// detached=false: taskkill /T /F da xu ly tree, detached tren win32 chi
+		// tao them console window thua.
+		const p = spawn(cmd, args, { cwd: cwd0, shell: false, stdio: ["ignore", "pipe", "pipe"], env: childEnv(opts.env), detached: process.platform !== "win32" })
 		opts.onSpawn?.(p)
 
 		const outChunks: Buffer[] = []
