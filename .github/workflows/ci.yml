@@ -41,6 +41,11 @@ jobs:
       - name: smoke test
         run: npm run smoke
 
+      # Regression gate chi chay tren 1 runner (ubuntu) cho nhanh.
+      - name: benchmark regression gate
+        if: matrix.os == 'ubuntu-latest'
+        run: npx tsx scripts/benchmark-tools.ts
+
   clean-install:
     name: Clean install (no cache, pinned Node)
     runs-on: ubuntu-latest

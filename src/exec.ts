@@ -13,10 +13,31 @@ export type ExecResult = {
 	outputBytesSeen: number
 }
 
+/*
+ * Cache ket qua resolve theo PATH hien tai. Quet PATH bang existsSync (~30 thu
+ * muc x 3 extension) ton vai ms MOI lan spawn, trong khi ket qua chi doi khi
+ * PATH doi. Key theo PATH la hop le: childEnv luon dung process.env.PATH va
+ * PROTECTED_ENV_KEYS chan client ghi de PATH cua tien trinh con.
+ */
+const resolveCache = new Map<string, string>()
+let resolveCachePath: string | null = null
+
 function resolveCmd(cmd: string): string {
 	if (process.platform !== "win32") return cmd
 	if (cmd.endsWith(".exe") || cmd.endsWith(".cmd") || cmd.endsWith(".bat")) return cmd
+	const pathEnv = process.env.PATH ?? ""
+	if (pathEnv !== resolveCachePath) {
+		resolveCache.clear()
+		resolveCachePath = pathEnv
+	}
+	const hit = resolveCache.get(cmd)
+	if (hit !== undefined) return hit
+	const resolved = resolveCmdUncached(cmd)
+	resolveCache.set(cmd, resolved)
+	return resolved
+}
 
+function resolveCmdUncached(cmd: string): string {
 	const pathDirs = (process.env.PATH ?? "").split(";").filter(Boolean)
 	for (const ext of [".cmd", ".bat", ".exe"]) {
 		if (cmd.includes("/") || cmd.includes("\\")) {

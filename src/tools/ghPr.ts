@@ -15,6 +15,27 @@ export const ghPrSchema = {
 	pr: z.string().optional().describe("So hoac URL cua PR (khi action=view)"),
 }
 
+let ghAvailability: Promise<void> | null = null
+
+/** Kiem tra gh CLI mot lan moi process thay vi spawn lai o moi call (~30-50ms). */
+function assertGhAvailable(cwd: string): Promise<void> {
+	if (!ghAvailability) {
+		ghAvailability = (async () => {
+			try {
+				const check = await run(["gh", "--version"], { cwd, timeoutMs: 5_000 })
+				if (check.code !== 0) throw new Error("gh CLI khong phan hoi")
+			} catch {
+				ghAvailability = null // cho phep thu lai o call sau
+				throw new Error(
+					`GitHub CLI (gh) chua duoc cai dat hoac khong nam trong PATH. ` +
+						`Cai dat gh CLI tu https://cli.github.com va dang nhap bang "gh auth login" de dung tool nay.`,
+				)
+			}
+		})()
+	}
+	return ghAvailability
+}
+
 export async function ghPr(a: {
 	repo?: string
 	action: "status" | "list" | "view" | "create"
@@ -26,18 +47,7 @@ export async function ghPr(a: {
 	const repo = resolveRepo(a.repo)
 	assertGitRepo(repo)
 
-	// Check if `gh` CLI is available
-	try {
-		const check = await run(["gh", "--version"], { cwd: repo.root, timeoutMs: 5_000 })
-		if (check.code !== 0) {
-			throw new Error("gh CLI khong phan hoi")
-		}
-	} catch (e) {
-		throw new Error(
-			`GitHub CLI (gh) chua duoc cai dat hoac khong nam trong PATH. ` +
-				`Cai dat gh CLI tu https://cli.github.com va dang nhap bang "gh auth login" de dung tool nay.`,
-		)
-	}
+	await assertGhAvailable(repo.root)
 
 	if (a.action === "status") {
 		const r = await run(["gh", "pr", "status"], { cwd: repo.root, timeoutMs: 30_000 })

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { run } from "../exec.js"
+import { mapLimit } from "../files/concurrency.js"
 import { allRepos, resolveRepo, type Repo } from "../repos.js"
 
 export const ripgrepSchema = {
@@ -36,7 +37,7 @@ const MAX_CHARS_PER_REPO = 40_000
  *
  * rg: glob sau ghi de glob truoc, nen phai day xuong SAU glob cua nguoi goi.
  */
-const DENY_GLOBS = [
+export const DENY_GLOBS = [
 	"!**/.env",
 	"!**/.env.*",
 	"!**/*.pem",
@@ -56,7 +57,7 @@ const DENY_GLOBS = [
 ]
 
 /** Cung deny-list nhung theo cu phap pathspec cua git, dung cho nhanh git grep. */
-const DENY_PATHSPECS = DENY_GLOBS.map((g) => `:(exclude)${g.slice(1)}`)
+export const DENY_PATHSPECS = DENY_GLOBS.map((g) => `:(exclude)${g.slice(1)}`)
 
 type Hit = {
 	repo: string
@@ -115,9 +116,9 @@ export async function ripgrep(a: Args) {
 	const targets = a.all_repos ? allRepos() : [resolveRepo(a.repo)]
 	const searched = targets.slice(0, MAX_REPOS)
 
-	// Tuan tu: 20 tien trinh rg cung luc lam treo may nhieu hon la tiet kiem thoi gian.
-	const results: Hit[] = []
-	for (const repo of searched) results.push(await grepOne(repo, a))
+	// Song song co tran: 4 tien trinh rg cung luc — truoc day chay tuan tu,
+	// 20 repo co the mat >1s. Gioi han 4 de khong treo may khi repo nhieu.
+	const results = await mapLimit(searched, 4, (repo) => grepOne(repo, a))
 
 	return {
 		repos_searched: searched.map((r) => r.name),

@@ -1,4 +1,4 @@
-import { appendFileSync, renameSync, statSync } from "node:fs"
+import { appendFile, rename, stat } from "node:fs/promises"
 
 const FILE = "audit.log"
 const MAX_BYTES = 5_000_000 // rotate 1 vong: audit.log -> audit.log.1
@@ -27,10 +27,29 @@ export function redactForAudit(args: unknown): unknown {
 	return out
 }
 
-function rotateIfNeeded() {
+/*
+ * Ghi bat dong bo theo lo. Audit nam tren duong nong cua MOI tool call; ban cu
+ * appendFileSync + statSync chan event loop tung lan. Loi ghi van bi bo qua nhu
+ * truoc (audit khong bao gio duoc lam sap tool call).
+ */
+let queue: string[] = []
+let flushing = false
+
+async function flush(): Promise<void> {
+	if (flushing) return
+	flushing = true
 	try {
-		if (statSync(FILE).size > MAX_BYTES) renameSync(FILE, `${FILE}.1`)
-	} catch {} // chua co file, hoac khong rotate duoc: cu ghi tiep
+		while (queue.length > 0) {
+			const chunk = queue.splice(0, queue.length).join("")
+			try {
+				const st = await stat(FILE).catch(() => null)
+				if (st && st.size > MAX_BYTES) await rename(FILE, `${FILE}.1`).catch(() => {})
+				await appendFile(FILE, chunk)
+			} catch {}
+		}
+	} finally {
+		flushing = false
+	}
 }
 
 export function audit(tool: string, args: unknown, ok: boolean, note = "") {
@@ -41,8 +60,9 @@ export function audit(tool: string, args: unknown, ok: boolean, note = "") {
 		ok,
 		note: note.slice(0, 2_000),
 	})
-	try {
-		rotateIfNeeded()
-		appendFileSync(FILE, line + "\n")
-	} catch {}
+	// Cap queue: neu ghi dia loi lien tuc thi drop bot dong cu nhat,
+	// thay vi de queue phinh RAM vo han.
+	if (queue.length >= 10_000) queue.splice(0, queue.length - 10_000)
+	queue.push(line + "\n")
+	void flush()
 }

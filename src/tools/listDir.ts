@@ -2,6 +2,7 @@ import { readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { z } from "zod"
 import { run } from "../exec.js"
+import { repoStamp } from "../contextCache.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolveDir } from "../security/paths.js"
 
@@ -20,6 +21,9 @@ const SKIP = new Set([
 	".venv",
 	"__pycache__",
 ])
+
+/** Cache ignore-set theo (thu muc, repoStamp) — git ls-files chi chay lai khi repo thay doi. */
+const IGNORE_CACHE = new Map<string, Set<string> | null>()
 
 export const listDirSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos)"),
@@ -90,7 +94,24 @@ export async function listDir(a: {
 	 * cua CV-AUT — hang nghin file build ra, khong co gia tri doc, va lan nao cung
 	 * lam agent tuong do la code cua du an.
 	 */
-	const ignored = a.include_ignored ? null : await ignoredNames(abs)
+	/*
+	 * Truoc day moi lan list_dir spawn 1 tien trinh git chi de biet thu muc nao bi
+	 * ignore (~30ms median). Cache theo repoStamp: tree khong doi thi ignore-set
+	 * khong doi; stamp da bat ca thay doi chua commit qua git status.
+	 */
+	let ignored: Set<string> | null = null
+	if (!a.include_ignored) {
+		const stamp = await repoStamp(repo.root)
+		const cacheKey = `${abs} ${stamp}`
+		const hit = IGNORE_CACHE.get(cacheKey)
+		if (hit !== undefined) {
+			ignored = hit
+		} else {
+			ignored = await ignoredNames(abs)
+			if (IGNORE_CACHE.size > 1000) IGNORE_CACHE.clear()
+			IGNORE_CACHE.set(cacheKey, ignored)
+		}
+	}
 
 	const kept = raw.filter((e) => !SKIP.has(e.name) && !(ignored?.has(e.name) ?? false))
 

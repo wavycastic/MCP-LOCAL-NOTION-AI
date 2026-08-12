@@ -1,7 +1,7 @@
-import { statSync } from "node:fs"
+import { stat } from "node:fs/promises"
 import { z } from "zod"
 import { MAX_READ_BYTES } from "../config.js"
-import { readTextSnapshot } from "../files/text.js"
+import { readTextSnapshotAsync } from "../files/text.js"
 import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
@@ -21,7 +21,7 @@ export async function readFile(a: {
 	const repo = resolveRepo(a.repo)
 	const abs = safeResolve(repo.root, a.path)
 
-	const size = statSync(abs).size
+	const size = (await stat(abs)).size
 	if (size > MAX_READ_BYTES) {
 		throw new Error(
 			`${a.path} nang ${size} bytes, vuot MAX_READ_BYTES=${MAX_READ_BYTES}. ` +
@@ -29,7 +29,7 @@ export async function readFile(a: {
 		)
 	}
 
-	const snap = readTextSnapshot(abs)
+	const snap = await readTextSnapshotAsync(abs)
 	const lines = snap.text.split("\n")
 	const start = (a.line_start ?? 1) - 1
 	const end = Math.min(a.line_end ?? start + 400, lines.length)

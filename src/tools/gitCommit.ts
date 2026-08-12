@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { run } from "../exec.js"
 import { assertWritableBranch } from "../git.js"
-import { startJob } from "../jobs.js"
+import { getSymbolIndex } from "../symbolIndex.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath } from "../security/paths.js"
 import { clearTouched, peekTouched } from "../touched.js"
@@ -19,7 +19,7 @@ export const gitCommitSchema = {
 		.boolean()
 		.optional()
 		.describe(
-			"Mac dinh true: sau khi commit tu chay lai index code graph o background de graph khong bi cu",
+			"Mac dinh true: sau khi commit tu warm lai tree-sitter symbol index o background de query dau tien nhanh",
 		),
 }
 
@@ -107,10 +107,9 @@ export async function gitCommit(a: {
 		timeoutMs: 15_000,
 	})
 
-	// Code vua doi thi code graph thanh lac hau ngay lap tuc. Neu de agent tu nho
-	// goi reindex thi se co luc no quen, va lan query sau tra ve du lieu cu ma
-	// khong co dau hieu gi. Chay ngay o background.
-	const job = a.reindex === false ? undefined : startJob(repo.name, repo.root, repo.root, [...repo.reindex])
+	// Code vua doi: warm lai symbol index ngay o background. Index tu invalidate
+	// theo repoStamp — day chi la prewarm de query dau tien sau commit nhanh.
+	if (a.reindex !== false) void getSymbolIndex(repo.root).catch(() => {})
 
 	return {
 		repo: repo.name,
@@ -118,7 +117,6 @@ export async function gitCommit(a: {
 		sha: sha.stdout.trim(),
 		exit_code: r.code,
 		committed: a.all ? "tat ca thay doi trong repo" : touched,
-		...(job ? { reindex_job: job.id } : {}),
 		output: r.stdout + r.stderr,
 	}
 }

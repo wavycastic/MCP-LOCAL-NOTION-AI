@@ -1,6 +1,7 @@
 import { relative, sep } from "node:path"
 import { z } from "zod"
 import { run } from "../exec.js"
+import { repoStamp } from "../contextCache.js"
 import { resolveRepo } from "../repos.js"
 import { isDeniedRelPath, safeResolveDir } from "../security/paths.js"
 
@@ -26,10 +27,11 @@ const DEFAULT_IGNORE_GLOBS = [
 	"!.venv",
 ]
 
-const GLOB_CACHE_TTL_MS = 250
 const regexCache = new Map<string, RegExp>()
 type GlobResult = { repo: string; engine: "ripgrep" | "git-ls-files"; paths: string[]; total_returned: number; truncated: boolean; cache_hit: boolean }
-const resultCache = new Map<string, { expiresAt: number; result: GlobResult }>()
+// Cache gan voi repoStamp thay vi TTL 250ms: tree doi (ke ca file chua commit) la
+// stamp doi -> key moi tu miss. invalidateGlobCache van xoa ngay khi tool ghi file.
+const resultCache = new Map<string, GlobResult>()
 
 export function invalidateGlobCache(repoRoot?: string): void {
 	if (!repoRoot) {
@@ -109,11 +111,12 @@ export async function globFiles(a: {
 	const repo = resolveRepo(a.repo)
 	const cwd = safeResolveDir(repo.root, a.path)
 	const maxResults = a.max_results ?? 1000
-	const cacheKey = [repo.root, cwd, a.patterns.join("\u0001"), String(!!a.include_ignored), String(maxResults), String(!!a.__force_fallback)].join("\u0000")
+	const stamp = await repoStamp(repo.root)
+	const cacheKey = [repo.root, stamp, cwd, a.patterns.join("\u0001"), String(!!a.include_ignored), String(maxResults), String(!!a.__force_fallback)].join("\u0000")
 	if (a.use_cache !== false) {
 		const cached = resultCache.get(cacheKey)
-		if (cached && cached.expiresAt > Date.now()) {
-			return { ...cached.result, paths: [...cached.result.paths], cache_hit: true }
+		if (cached) {
+			return { ...cached, paths: [...cached.paths], cache_hit: true }
 		}
 	}
 
@@ -188,7 +191,8 @@ export async function globFiles(a: {
 		cache_hit: false,
 	}
 	if (a.use_cache !== false) {
-		resultCache.set(cacheKey, { expiresAt: Date.now() + GLOB_CACHE_TTL_MS, result })
+		if (resultCache.size > 500) resultCache.clear()
+		resultCache.set(cacheKey, result)
 	}
 	return result
 }
