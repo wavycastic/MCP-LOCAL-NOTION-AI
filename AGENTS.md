@@ -19,6 +19,7 @@ src/lock.ts            mutex theo tung repo + job-level leases
 src/jobs.ts            job chay dai (build/test/terminal background), van di qua mutex lease
 src/log.ts             audit.log: redact noi dung file, patch, command, env + rotate
 src/tools/*.ts         moi tool: schema zod + handler (read_many_files, glob_files, terminal...)
+src/contextCache.ts    cache doc dung chung: key gan git HEAD + fingerprint (size+mtime), TTL 6h
 src/tools/index.ts     registry: annotations, lock, audit, isError, compact JSON
 ```
 

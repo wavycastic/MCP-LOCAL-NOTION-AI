@@ -53,7 +53,7 @@ export const antigravitySpawnSchema = {
 	interactive: z
 		.boolean()
 		.optional()
-		.describe("Bat cua so Terminal tuong tac/live log truoc mat nguoi dung (true). Chon false de chay ngam API stream."),
+		.describe("Hien thi cua so Terminal Live Viewer tren man hinh nguoi dung (mac dinh true)."),
 }
 
 export async function antigravitySpawn(a: {

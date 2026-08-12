@@ -1,7 +1,6 @@
 {
   "defaults": {
-    "branchPrefix": "agent/",
-    "reindex": ["npx", "gitnexus", "analyze"]
+    "branchPrefix": "agent/"
   },
   "repos": [
     {

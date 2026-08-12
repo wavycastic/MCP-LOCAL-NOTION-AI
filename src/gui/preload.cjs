@@ -6,8 +6,6 @@ contextBridge.exposeInMainWorld("localRepoMcp", {
 	saveConfig: (cfg) => ipcRenderer.invoke("save-config", cfg),
 	startMcp: (env) => ipcRenderer.invoke("start-mcp", env),
 	stopMcp: () => ipcRenderer.invoke("stop-mcp"),
-	startGitnexus: (env) => ipcRenderer.invoke("start-gitnexus", env),
-	stopGitnexus: () => ipcRenderer.invoke("stop-gitnexus"),
 	startTunnel: () => ipcRenderer.invoke("start-tunnel"),
 	stopTunnel: () => ipcRenderer.invoke("stop-tunnel"),
 	onState: (cb) => ipcRenderer.on("state", (_e, v) => cb(v)),

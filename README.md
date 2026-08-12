@@ -4,7 +4,7 @@ Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), hỗ tr
 
 > [!IMPORTANT]
 > **Tài liệu được đối chiếu trực tiếp với mã nguồn thực tế (phiên bản v0.3.0).**
-> Server hiện đăng ký **45 công cụ MCP** chính thức, hỗ trợ kiểm soát đường dẫn theo repository, bảo vệ branch, ghi tệp nguyên tử, xác thực Bearer token an toàn và các phương thức thực thi qua Node.js CLI, Docker hoặc ứng dụng Electron Desktop.
+> Server hiện đăng ký **45 công cụ MCP** chính thức, hỗ trợ kiểm soát đường dẫn theo repository, bảo vệ branch, ghi tệp nguyên tử, xác thực Bearer token an toàn và các phương thức thực thi qua Node.js CLI hoặc ứng dụng Electron Desktop.
 
 ---
 
@@ -30,7 +30,6 @@ flowchart TD
     SysTools["Phân nhóm: Hệ thống & metrics (4)"]
 
     Security["Giới hạn đường dẫn & danh sách cấm"]
-    GitNexus["GitNexus Indexer Sidecar"]
     LocalRepos["Local Repositories (FileSystem / Git)"]
 
     Client -->|Bearer Auth| Tunnel
@@ -52,7 +51,6 @@ flowchart TD
     GitTools --> Security
     TermTools --> Security
     Security --> LocalRepos
-    GitTools -->|git_commit (reindex: true)| GitNexus
 ```
 
 ### Các thành phần chính
@@ -61,8 +59,8 @@ flowchart TD
 - **Path Resolver & Security**: Đảm bảo mọi đường dẫn tệp đều được phân giải (resolve) và xác minh nằm trong thư mục gốc của repository chỉ định, ngăn chặn path traversal (`../`), symlink escape và kiểm tra danh sách cấm (Deny-List).
 - **Repo Lock Manager**: Quản lý khóa độc quyền theo từng repository (`withLock`) để tránh xung đột ghi tệp và tranh chấp dữ liệu khi có nhiều yêu cầu đồng thời.
 - **PTY Session Manager**: Quản lý các phiên terminal tương tác kéo dài (`node-pty`) có hỗ trợ ring buffer, bộ đếm byte cursor và tự động dọn dẹp khi hết thời gian chờ.
-- **Tích hợp GitNexus**: Mặc định kích hoạt lệnh re-index ngầm (`repo.reindex`, mặc định `npx gitnexus analyze`) sau mỗi lần `git_commit` thành công (có thể tắt bằng `reindex: false`).
-- **Ứng dụng Electron Desktop**: Cung cấp giao diện đồ họa kèm khay hệ thống (System Tray) để quản lý khởi chạy MCP server, GitNexus proxy và Cloudflare tunnel.
+- **Tree-sitter Symbol Index**: Lập chỉ mục symbol trong tiến trình (TS/JS/C#/Python/Go/Rust), tự vô hiệu theo `repoStamp` và warm lại ngầm sau mỗi `git_commit` — không cần indexer bên ngoài.
+- **Ứng dụng Electron Desktop**: Cung cấp giao diện đồ họa kèm khay hệ thống (System Tray) để quản lý khởi chạy MCP server và Cloudflare tunnel.
 
 ---
 
@@ -109,7 +107,7 @@ curl http://127.0.0.1:8765/health
 
 ### Cách 2: Chạy qua ứng dụng Electron Desktop
 
-Giao diện đồ họa hỗ trợ quản lý server, sinh token ngẫu nhiên, xem log và điều khiển Cloudflare Tunnel / GitNexus Proxy.
+Giao diện đồ họa hỗ trợ quản lý server, sinh token ngẫu nhiên, xem log và điều khiển Cloudflare Tunnel.
 
 ```bash
 # Khởi chạy giao diện Desktop
@@ -118,17 +116,6 @@ npm run gui
 # Đóng gói thành bản Portable trên Windows
 npm run dist:win
 ```
-
-### Cách 3: Chạy bằng Docker Desktop
-
-> [!WARNING]
-> **Cảnh báo về cấu hình Docker**: File `docker-compose.yml` trong repository hiện chứa các đường dẫn tuyệt đối local (`E:/Projects:...`, `C:\Users\Administrator\...`), bind mount và `AUTH_TOKEN` mẫu cụ thể theo máy cá nhân. Bạn **bắt buộc phải tùy chỉnh** `docker-compose.yml` và `repos.docker.json` để khớp với đường dẫn và credential thực tế trên máy mình trước khi khởi chạy container.
-
-```bash
-# Sau khi đã điều chỉnh docker-compose.yml và repos.docker.json:
-docker compose up -d --build
-```
-*Lưu ý*: Với Docker, đường dẫn repo trong `repos.docker.json` phải là đường dẫn tuyệt đối bên trong container (ví dụ: `/projects/cv-aut`). Docker image sử dụng `node:22-slim`, cài sẵn Git, `ripgrep` và `.NET SDK 10`.
 
 ---
 
@@ -141,8 +128,7 @@ Khi `WORKSPACE_ROOT` không được cấu hình trong `.env`, server chỉ ph�
 ```json
 {
   "defaults": {
-    "branchPrefix": "agent/",
-    "reindex": ["npx", "gitnexus", "analyze"]
+    "branchPrefix": "agent/"
   },
   "repos": [
     {
@@ -167,8 +153,6 @@ Khi `WORKSPACE_ROOT` không được cấu hình trong `.env`, server chỉ ph�
 - `write`: `true` để cho phép ghi tệp, commit; `false` (mặc định) là chỉ đọc.
 - `branchPrefix`: Prefix của Git branch cho phép ghi (ví dụ: `agent/`). Đặt `"*"` hoặc chuỗi rỗng để cho phép ghi trên mọi branch (kể cả `main`/`master`).
 - `build` / `test` / `lint` / `typecheck`: Mảng câu lệnh dạng argv (ví dụ: `["npm", "run", "build"]`). Nếu không khai báo, server tự suy đoán theo toolchain (`npm`, `dotnet`, `cargo`, `go`, `python`, `maven`).
-- `reindex`: Mảng câu lệnh re-index chạy ngầm sau commit (mặc định: `["npx", "gitnexus", "analyze"]`).
-
 ### 4.2. Tự động phát hiện repository (`WORKSPACE_ROOT`)
 
 Nếu cấu hình `WORKSPACE_ROOT` trong `.env`, tất cả thư mục con trực tiếp chứa thư mục `.git` sẽ tự động được nhận diện.
@@ -183,11 +167,11 @@ Nếu cấu hình `WORKSPACE_ROOT` trong `.env`, tất cả thư mục con trự
 
 ---
 
-## 5. Danh sách 45 công cụ MCP (Tool Registry)
+## 5. Danh sách 48 công cụ MCP (Tool Registry)
 
-Server đăng ký chính xác **45 công cụ MCP** phân làm 7 nhóm chức năng:
+Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức năng:
 
-### Nhóm 1: Đọc và khám phá mã nguồn (6 công cụ)
+### Nhóm 1: Đọc và khám phá mã nguồn (9 công cụ)
 | Công cụ | Mô tả |
 | :--- | :--- |
 | `list_repos` | Liệt kê các repo đang phục vụ, quyền ghi (`write`) và toolchain. Nên gọi đầu tiên khi chưa biết tên repo. |
@@ -196,6 +180,9 @@ Server đăng ký chính xác **45 công cụ MCP** phân làm 7 nhóm chức n�
 | `list_dir` | Liệt kê cây thư mục (tự động bỏ qua `node_modules`, `bin`, `obj`, `dist`, `.git`). |
 | `glob_files` | Tìm đường dẫn tệp theo mẫu pattern glob (cache kết quả regex 250ms). |
 | `ripgrep` | Tìm kiếm chuỗi/regex trong codebase (hỗ trợ `all_repos: true` để tìm xuyên các repo). |
+| `get_feature_context` | Gộp glob+grep+đọc file thành 1 lệnh gọi: nhập query, nhận toàn bộ file liên quan trong 1 payload (3 mức chi tiết `detail`: L0 danh sách, L1 outline+đoạn quanh match, L2 nguyên file; cache theo git HEAD + fingerprint). |
+| `trace_flow` | Lần luồng thực thi của 1 symbol trong 1 lệnh gọi: định nghĩa (kèm body), nơi gọi nó (callers), nó gọi gì (callees, hỗ trợ `depth: 2`). |
+| `analyze_feature` | 1 lệnh gọi duy nhất cho câu hỏi về 1 chức năng: gộp tìm file liên quan + lần luồng gọi symbol chính (tự đoán từ query hoặc truyền `symbol`). |
 
 ### Nhóm 2: Chỉnh sửa tệp và áp dụng patch (7 công cụ)
 | Công cụ | Mô tả |
@@ -291,7 +278,7 @@ Biến môi trường `TOOL_PROFILE` trong `src/config.ts` cho phép giới hạ
 | :--- | :--- | :--- |
 | `MCP_TOKEN` | *(Bắt buộc)* | Token Bearer xác thực truy cập endpoint `/mcp`. |
 | `PORT` | `8765` | Cổng HTTP server lắng nghe. |
-| `HOST` | `127.0.0.1` | Địa chỉ IP bind (trong Docker đặt `0.0.0.0`). |
+| `HOST` | `127.0.0.1` | Địa chỉ IP bind. |
 | `REPOS_CONFIG` | `repos.json` | Đường dẫn tệp cấu hình danh sách repository. |
 | `WORKSPACE_ROOT` | *(Không)* | Thư mục cha chứa nhiều repo để tự động nhận diện. |
 | `AUTO_DISCOVERED_WRITE` | `false` | Cho phép ghi đối với repo tự động phát hiện. |
@@ -333,7 +320,7 @@ Kết quả kiểm thử khi chạy với môi trường chuẩn:
 ```powershell
 $env:DEFAULT_BRANCH_PREFIX="agent/"; npm run smoke
 ```
-Trả về kết quả: **`167 pass, 0 fail`** trên tổng số 167 assertion của script `smoke.ts`.
+Trả về kết quả: **`190 pass, 0 fail`** trên tổng số 190 assertion của script `smoke.ts`.
 
 ### 9.2. Kết quả đo hiệu năng thực nghiệm (Benchmark)
 
@@ -347,6 +334,8 @@ Các số liệu dưới đây được đo lường thực nghiệm bằng `npx
 | 10 files patch (1 × `apply_patch`) | **20.39 ms** | 21.65 ms | 1 | 100% |
 | Read 10 files (10 × `read_file`) | **6.40 ms** | 7.24 ms | 10 | 100% |
 | Read 10 files (1 × `read_many_files`) | **5.57 ms** | 6.35 ms | 1 | 100% |
+| Feature context cold (1 × `get_feature_context`) | **36.61 ms** | 40.35 ms | 1 | 100% |
+| Feature context warm cache (1 × `get_feature_context`) | **6.80 ms** | 8.23 ms | 1 | 100% |
 | List directory (`list_dir`) | **22.62 ms** | 23.88 ms | 1 | 100% |
 | Glob files (Warm Cache) | **0.05 ms** | 13.97 ms | 1 | 100% |
 | Terminal Foreground | **8.92 ms** | 10.01 ms | 1 | 100% |

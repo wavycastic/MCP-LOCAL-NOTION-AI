@@ -14,7 +14,11 @@ export async function killJob(a: { repo?: string; job_id: string }) {
 	}
 
 	if (a.repo) {
-		resolveRepo(a.repo)
+		// Chan kill cheo: job phai thuoc repo duoc chi dinh.
+		const repo = resolveRepo(a.repo)
+		if (job.repo !== repo.name) {
+			throw new Error(`job "${a.job_id}" thuoc repo "${job.repo}", khong phai "${repo.name}"`)
+		}
 	}
 
 	if (isJobFinished(job)) {

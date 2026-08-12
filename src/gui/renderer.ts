@@ -1,6 +1,5 @@
 type State = {
 	mcp: { running: boolean; pid: number | null; startedAt: string | null }
-	gitnexus: { running: boolean; pid: number | null; startedAt: string | null }
 	tunnel: { running: boolean; pid: number | null; startedAt: string | null }
 }
 
@@ -8,11 +7,6 @@ type Config = {
 	mcpLocalUrl: string
 	mcpPublicUrl: string | null
 	mcpToken: string | null
-	gitnexusLocalUrl?: string
-	gitnexusPublicUrl?: string | null
-	gitnexusToken?: string
-	allowFlowlens?: boolean
-	allowGitnexus?: boolean
 }
 
 type Api = {
@@ -21,8 +15,6 @@ type Api = {
 	saveConfig?: (cfg: Partial<Pick<Config, "mcpPublicUrl" | "mcpToken">>) => Promise<unknown>
 	startMcp: (env: Record<string, string>) => Promise<State>
 	stopMcp: () => Promise<State>
-	startGitnexus?: (env: Record<string, string>) => Promise<State>
-	stopGitnexus?: () => Promise<State>
 	startTunnel: () => Promise<State>
 	stopTunnel: () => Promise<State>
 	onState: (cb: (state: State) => void) => void
@@ -41,7 +33,6 @@ const logEl = document.getElementById("log") as HTMLPreElement
 const statusEl = document.getElementById("status") as HTMLSpanElement
 let lastState: State = {
 	mcp: { running: false, pid: null, startedAt: null },
-	gitnexus: { running: false, pid: null, startedAt: null },
 	tunnel: { running: false, pid: null, startedAt: null },
 }
 const els = {

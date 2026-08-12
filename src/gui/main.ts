@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, MenuItem, nativeImage, Tray } from "electron"
+import { app, BrowserWindow, ipcMain, Menu, MenuItem, nativeImage, safeStorage, Tray } from "electron"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -9,21 +9,15 @@ type DashboardConfig = {
 	mcpLocalUrl: string
 	mcpPublicUrl: string | null
 	mcpToken: string | null
-	gitnexusLocalUrl: string
-	gitnexusPublicUrl: string | null
-	gitnexusToken: string
-	allowFlowlens?: boolean
-	allowGitnexus?: boolean
 }
-type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken" | "gitnexusPublicUrl" | "gitnexusToken" | "allowFlowlens" | "allowGitnexus">>
+type SavedDashboardConfig = Partial<Pick<DashboardConfig, "mcpPublicUrl" | "mcpToken">>
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 
-const procs: Record<"mcp" | "gitnexus" | "tunnel", { child: ChildProcessWithoutNullStreams | null; startedAt: string | null }> = {
+const procs: Record<"mcp" | "tunnel", { child: ChildProcessWithoutNullStreams | null; startedAt: string | null }> = {
 	mcp: { child: null, startedAt: null },
-	gitnexus: { child: null, startedAt: null },
 	tunnel: { child: null, startedAt: null },
 }
 
@@ -35,11 +29,37 @@ function savedConfigPath(): string {
 	return join(app.getPath("userData"), "dashboard-config.json")
 }
 
+const ENC_PREFIX = "enc:v1:"
+
+/** Ma hoa token truoc khi ghi dia (DPAPI tren Windows). Khong co thi giu plaintext nhu cu. */
+function protectToken(value: string): string {
+	if (value.startsWith(ENC_PREFIX)) return value
+	try {
+		if (safeStorage.isEncryptionAvailable()) {
+			return ENC_PREFIX + safeStorage.encryptString(value).toString("base64")
+		}
+	} catch {}
+	return value
+}
+
+/** Ban cu plaintext van doc duoc; ban ma hoa ma khong giai duoc (doi may/user) thi tra rong de sinh token moi. */
+function unprotectToken(value: string): string {
+	if (!value.startsWith(ENC_PREFIX)) return value
+	try {
+		if (safeStorage.isEncryptionAvailable()) {
+			return safeStorage.decryptString(Buffer.from(value.slice(ENC_PREFIX.length), "base64"))
+		}
+	} catch {}
+	return ""
+}
+
 function readSavedConfig(): SavedDashboardConfig {
 	const p = savedConfigPath()
 	if (!existsSync(p)) return {}
 	try {
-		return JSON.parse(readFileSync(p, "utf8")) as SavedDashboardConfig
+		const raw = JSON.parse(readFileSync(p, "utf8")) as SavedDashboardConfig
+		if (raw.mcpToken) raw.mcpToken = unprotectToken(raw.mcpToken)
+		return raw
 	} catch {
 		return {}
 	}
@@ -49,7 +69,12 @@ function writeSavedConfig(cfg: SavedDashboardConfig): SavedDashboardConfig {
 	const current = readSavedConfig()
 	const next: SavedDashboardConfig = { ...current, ...cfg }
 	mkdirSync(dirname(savedConfigPath()), { recursive: true })
-	writeFileSync(savedConfigPath(), JSON.stringify(next, null, 2), "utf8")
+	// Token la bi mat dang nhap — khong ghi plaintext xuong dia.
+	const toDisk: SavedDashboardConfig = {
+		...next,
+		...(next.mcpToken ? { mcpToken: protectToken(next.mcpToken) } : {}),
+	}
+	writeFileSync(savedConfigPath(), JSON.stringify(toDisk, null, 2), "utf8")
 	return next
 }
 
@@ -131,39 +156,37 @@ function dashboardConfig(env: Record<string, string> = {}): DashboardConfig {
 	const saved = readSavedConfig()
 	const host = env.HOST || readEnvValue("HOST") || "127.0.0.1"
 	const port = env.PORT || readEnvValue("PORT") || "8765"
-	const gitPort = env.GITNEXUS_PROXY_PORT || "3000"
 	const mcpToken = env.MCP_TOKEN || saved.mcpToken || readEnvValue("MCP_TOKEN") || randomToken()
-	const gitToken = env.GITNEXUS_TOKEN || env.AUTH_TOKEN || saved.gitnexusToken || readEnvValue("GITNEXUS_TOKEN") || readEnvValue("AUTH_TOKEN") || randomToken()
-	writeSavedConfig({
+	const nextCfg: SavedDashboardConfig = {
 		mcpToken,
-		gitnexusToken: gitToken,
 		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
-		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
-	})
+	}
+	// Chi ghi khi co thay doi — truoc day MOI lan goi ham nay deu ghi file, ma no
+	// bi goi lap nhieu lan moi lan start service.
+	if (saved.mcpToken !== nextCfg.mcpToken || saved.mcpPublicUrl !== nextCfg.mcpPublicUrl) {
+		writeSavedConfig(nextCfg)
+	}
 	return {
 		mcpLocalUrl: `http://${host}:${port}/mcp`,
 		mcpPublicUrl: saved.mcpPublicUrl || "https://mcp.wavycastic.id.vn/mcp",
 		mcpToken,
-		gitnexusLocalUrl: `http://127.0.0.1:${gitPort}/mcp`,
-		gitnexusPublicUrl: saved.gitnexusPublicUrl || "https://gitnexus.wavycastic.id.vn/mcp",
-		gitnexusToken: gitToken,
 	}
 }
 
 function state() {
-	const one = (k: "mcp" | "gitnexus" | "tunnel"): ProcState => ({
+	const one = (k: "mcp" | "tunnel"): ProcState => ({
 		running: !!procs[k].child,
 		pid: procs[k].child?.pid ?? null,
 		startedAt: procs[k].startedAt,
 	})
-	return { mcp: one("mcp"), gitnexus: one("gitnexus"), tunnel: one("tunnel") }
+	return { mcp: one("mcp"), tunnel: one("tunnel") }
 }
 
 function send(channel: string, payload: unknown) {
 	win?.webContents.send(channel, payload)
 }
 
-function appendLog(source: "mcp" | "gitnexus" | "tunnel" | "gui", text: string) {
+function appendLog(source: "mcp" | "tunnel" | "gui", text: string) {
 	send("log", { at: new Date().toISOString(), source, text })
 }
 
@@ -291,6 +314,12 @@ function startMcp(env: Record<string, string>) {
 	if (!mergedEnv.FULL_ACCESS_CWD) {
 		mergedEnv.FULL_ACCESS_CWD = mergedEnv.WORKSPACE_ROOT || repoRoot()
 	}
+	// .env thieu MCP_TOKEN thi dung token GUI da sinh/luu — thieu dong nay la server
+	// chet ngay khi boot (config.ts bat buoc MCP_TOKEN) trong khi GUI van hien token.
+	if (!mergedEnv.MCP_TOKEN) {
+		const generated = dashboardConfig(env).mcpToken
+		if (generated) mergedEnv.MCP_TOKEN = generated
+	}
 
 	procs.mcp.child = spawn("node", [entry], {
 		cwd: repoRoot(),
@@ -299,37 +328,6 @@ function startMcp(env: Record<string, string>) {
 	})
 	wire("mcp")
 	appendLog("gui", `started local-repo-mcp pid=${procs.mcp.child.pid ?? "?"}`)
-	send("state", state())
-	return state()
-}
-
-function startGitnexus(env: Record<string, string>) {
-	if (procs.gitnexus.child) return state()
-	const cfg = dashboardConfig(env)
-	if (!cfg.allowGitnexus) {
-		appendLog("gui", "GitNexus MCP is disabled by ALLOW_GITNEXUS=false setting.")
-		return state()
-	}
-	const entry = join(rootDir(), "scripts", "gitnexus-proxy.mjs")
-	if (!existsSync(entry)) throw new Error(`khong tim thay ${entry}`)
-	const token = dashboardConfig(env).gitnexusToken
-	procs.gitnexus.startedAt = new Date().toISOString()
-
-	const envFile = readEnvFile()
-	const mergedEnv: Record<string, string> = {
-		...envFile,
-		...(process.env as Record<string, string>),
-		...env,
-		AUTH_TOKEN: token,
-	}
-
-	procs.gitnexus.child = spawn("node", [entry, token], {
-		cwd: repoRoot(),
-		env: mergedEnv,
-		windowsHide: true,
-	})
-	wire("gitnexus")
-	appendLog("gui", `started gitnexus proxy pid=${procs.gitnexus.child.pid ?? "?"}`)
 	send("state", state())
 	return state()
 }
@@ -367,7 +365,7 @@ function startTunnel() {
 	return state()
 }
 
-function wire(kind: "mcp" | "gitnexus" | "tunnel") {
+function wire(kind: "mcp" | "tunnel") {
 	const child = procs[kind].child
 	if (!child) return
 	child.stdout.on("data", (d) => appendLog(kind, d.toString()))
@@ -381,7 +379,7 @@ function wire(kind: "mcp" | "gitnexus" | "tunnel") {
 	child.on("error", (e) => appendLog("gui", `${kind} error: ${e.message}`))
 }
 
-function stop(kind: "mcp" | "gitnexus" | "tunnel") {
+function stop(kind: "mcp" | "tunnel") {
 	const child = procs[kind].child
 	if (!child) return state()
 	appendLog("gui", `stopping ${kind}`)
@@ -402,8 +400,6 @@ ipcMain.handle("config", (_evt: unknown, env: Record<string, string>) => dashboa
 ipcMain.handle("save-config", (_evt: unknown, cfg: SavedDashboardConfig) => writeSavedConfig(cfg))
 ipcMain.handle("start-mcp", (_evt: unknown, env: Record<string, string>) => startMcp(env))
 ipcMain.handle("stop-mcp", () => stop("mcp"))
-ipcMain.handle("start-gitnexus", (_evt: unknown, env: Record<string, string>) => startGitnexus(env))
-ipcMain.handle("stop-gitnexus", () => stop("gitnexus"))
 ipcMain.handle("start-tunnel", () => startTunnel())
 ipcMain.handle("stop-tunnel", () => stop("tunnel"))
 
@@ -416,7 +412,6 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
 	if (isQuitting) {
 		stop("mcp")
-		stop("gitnexus")
 		stop("tunnel")
 		if (process.platform !== "darwin") app.quit()
 	}
@@ -425,6 +420,5 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
 	isQuitting = true
 	stop("mcp")
-	stop("gitnexus")
 	stop("tunnel")
 })

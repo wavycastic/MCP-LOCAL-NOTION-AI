@@ -18,11 +18,6 @@ export type MetricsSnapshot = {
 	startedAt: number
 	uptimeSeconds: number
 	tools: Record<string, ToolMetric>
-	flowlens: {
-		sidecarTimeouts: number
-		sidecarCrashes: number
-		sidecarParseErrors: number
-	}
 	pty: {
 		sessionsOpened: number
 		sessionsClosed: number
@@ -32,12 +27,6 @@ export type MetricsSnapshot = {
 
 const startedAt = Date.now()
 const toolMetrics: Record<string, ToolMetric> = {}
-
-const flowlensCounters = {
-	timeouts: 0,
-	crashes: 0,
-	parseErrors: 0,
-}
 
 const ptyCounters = {
 	open: 0,
@@ -76,14 +65,6 @@ export function recordToolCall(tool: string, durationMs: number, success: boolea
 }
 
 // ---------------------------------------------------------------------------
-// FlowLens sidecar metrics
-// ---------------------------------------------------------------------------
-
-export function recordFlowLensTimeout(): void { flowlensCounters.timeouts++ }
-export function recordFlowLensCrash(): void { flowlensCounters.crashes++ }
-export function recordFlowLensParseError(): void { flowlensCounters.parseErrors++ }
-
-// ---------------------------------------------------------------------------
 // PTY metrics
 // ---------------------------------------------------------------------------
 
@@ -100,11 +81,6 @@ export function getMetricsSnapshot(): MetricsSnapshot {
 		startedAt,
 		uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
 		tools: { ...toolMetrics },
-		flowlens: {
-			sidecarTimeouts: flowlensCounters.timeouts,
-			sidecarCrashes: flowlensCounters.crashes,
-			sidecarParseErrors: flowlensCounters.parseErrors,
-		},
 		pty: {
 			sessionsOpened: ptyCounters.open,
 			sessionsClosed: ptyCounters.close,

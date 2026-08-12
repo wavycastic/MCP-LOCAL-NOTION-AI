@@ -25,26 +25,6 @@ function optRealpath(name: string): string | null {
 	}
 }
 
-/**
- * Tach mot dong lenh thanh argv, co ton trong "..." va '...'.
- *
- * Truoc day chi .split(" "): dat
- *   DEFAULT_REINDEX_CMD="C:/Program Files/nodejs/npx.cmd gitnexus analyze"
- * se thanh ["C:/Program", "Files/nodejs/npx.cmd", ...] va bao "khong tim thay
- * lenh" — ma duong dan co khoang trang la chuyen thuong ngay tren Windows.
- */
-function argvFromEnv(name: string, dflt: string): string[] {
-	const raw = (process.env[name] ?? dflt).trim()
-	const out: string[] = []
-	const re = /"([^"]*)"|'([^']*)'|(\S+)/g
-	let m: RegExpExecArray | null
-	while ((m = re.exec(raw)) !== null) {
-		out.push(m[1] ?? m[2] ?? m[3] ?? "")
-	}
-	if (out.length === 0) throw new Error(`${name} rong — can it nhat mot lenh`)
-	return out
-}
-
 export const MCP_TOKEN = req("MCP_TOKEN")
 export const PORT = Number(process.env.PORT ?? 8765)
 export const HOST = process.env.HOST ?? "127.0.0.1"
@@ -180,9 +160,6 @@ export type ToolProfile = "agent" | "core" | "safe" | "full"
 const rawProfile = (process.env.TOOL_PROFILE ?? "full").toLowerCase()
 export const TOOL_PROFILE: ToolProfile =
 	rawProfile === "agent" ? "agent" : rawProfile === "core" ? "core" : rawProfile === "safe" ? "safe" : "full"
-
-/** Lenh reindex code graph mac dinh, chay trong tung repo. */
-export const DEFAULT_REINDEX_CMD = argvFromEnv("DEFAULT_REINDEX_CMD", "npx gitnexus analyze")
 
 /* ── Antigravity sub-agent ──────────────────────────────────────────────── */
 

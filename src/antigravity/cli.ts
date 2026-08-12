@@ -156,14 +156,17 @@ function ensureLiveWindow(live: Live, cwd: string, prompt: string): void {
 	if (!live.id) return
 	if (!live.logPath) {
 		const cleanId = live.id.replace(/[^a-zA-Z0-9_-]/g, "_")
-		const logFile = join(tmpdir(), `antigravity_${cleanId}.log`)
-		live.logPath = logFile
-		if (!existsSync(logFile)) {
-			const header =
-				`\n  ${ANSI.gray}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}\n` +
-				`  ${ANSI.brightCyan}🤖  ANTIGRAVITY SUB-AGENT${ANSI.reset} ${ANSI.gray}·  ${live.id.slice(0, 8)}  ·  ${cwd}${ANSI.reset}\n` +
-				`  ${ANSI.gray}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}\n`
-			writeFileSync(logFile, header, "utf8")
+		live.logPath = join(tmpdir(), `antigravity_${cleanId}.log`)
+	}
+	if (!existsSync(live.logPath)) {
+		const header =
+			`\n  ${ANSI.gray}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}\n` +
+			`  ${ANSI.brightCyan}🤖  ANTIGRAVITY SUB-AGENT${ANSI.reset} ${ANSI.gray}·  ${live.id.slice(0, 8)}  ·  ${cwd}${ANSI.reset}\n` +
+			`  ${ANSI.gray}──────────────────────────────────────────────────────────────────────────────${ANSI.reset}\n`
+		try {
+			writeFileSync(live.logPath, header, "utf8")
+		} catch {
+			// Ignore write errors
 		}
 	}
 
@@ -180,12 +183,46 @@ function ensureLiveWindow(live: Live, cwd: string, prompt: string): void {
 
 	try {
 		if (process.platform === "win32") {
+			const cleanId = live.id.replace(/[^a-zA-Z0-9_-]/g, "_")
 			const title = `Antigravity Live Viewer (${live.id.slice(0, 8)})`
-			const psCmd = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $host.ui.RawUI.WindowTitle = '${title}'; Get-Content -Path '${live.logPath}' -Wait -Tail 40`
-			const wProc = spawn("powershell.exe", ["-NoExit", "-ExecutionPolicy", "Bypass", "-Command", psCmd], {
-				detached: true,
-				stdio: "ignore",
-				windowsHide: false,
+			const viewerScript = join(tmpdir(), `antigravity_${cleanId}_viewer.ps1`)
+			const psLiteral = (value: string): string => value.replace(/'/g, "''")
+			const script = [
+				"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+				`try { $Host.UI.RawUI.WindowTitle = '${psLiteral(title)}' } catch {}`,
+				`try { [Console]::Title = '${psLiteral(title)}' } catch {}`,
+				`$logPath = '${psLiteral(live.logPath)}'`,
+				"while (-not (Test-Path -LiteralPath $logPath)) { Start-Sleep -Milliseconds 200 }",
+				"Get-Content -LiteralPath $logPath -Wait -Tail 40",
+			].join("\r\n")
+			writeFileSync(viewerScript, script, "utf8")
+
+			// Console processes launched by the headless MCP process can stay alive
+			// without receiving a visible window. Windows Terminal is the desktop UI
+			// entry point and reliably opens a visible tab in the user's session.
+			const wProc = spawn(
+				"wt.exe",
+				[
+					"new-tab",
+					"--title",
+					title,
+					"powershell.exe",
+					"-NoLogo",
+					"-NoExit",
+					"-ExecutionPolicy",
+					"Bypass",
+					"-File",
+					viewerScript,
+				],
+				{
+					detached: true,
+					stdio: "ignore",
+					windowsHide: false,
+				},
+			)
+			wProc.once("error", (err) => {
+				live.windowOpened = false
+				appendLiveLog(live, `\n[Live Viewer Error]: ${err.message}\n`)
 			})
 			wProc.unref()
 			live.windowProc = wProc
@@ -217,6 +254,10 @@ function handleLine(live: Live, line: string): void {
 
 	const id = ev.conversation_id ?? ev.step_update?.conversation_id ?? ev.result?.conversation_id
 	if (id && !live.id) live.id = id
+	if (live.id && !live.logPath) {
+		const cleanId = live.id.replace(/[^a-zA-Z0-9_-]/g, "_")
+		live.logPath = join(tmpdir(), `antigravity_${cleanId}.log`)
+	}
 
 	if (ev.event === "init" && ev.init) {
 		if (ev.init.model) live.model = ev.init.model
@@ -391,6 +432,11 @@ export async function startRun(a: StartArgs): Promise<Session> {
 	delete live.error
 	delete live.ended_at
 
+	if (live.id && !live.logPath) {
+		const cleanId = live.id.replace(/[^a-zA-Z0-9_-]/g, "_")
+		live.logPath = join(tmpdir(), `antigravity_${cleanId}.log`)
+	}
+
 	const proc = spawn(ANTIGRAVITY_CLI_BIN, argvFor(a), { cwd: a.cwd, windowsHide: true })
 	live.proc = proc
 
@@ -480,8 +526,20 @@ export function listSessions(): Session[] {
 
 export function stopSession(id: string): boolean {
 	const live = sessions.get(id)
-	if (!live?.proc) return false
-	live.proc.kill()
+	if (!live) return false
+	let stopped = false
+	if (live.proc) {
+		live.proc.kill()
+		delete live.proc
+		stopped = true
+	}
+	if (live.windowProc) {
+		live.windowProc.kill()
+		delete live.windowProc
+		stopped = true
+	}
 	live.status = "CANCELED"
-	return true
+	live.ended_at = new Date().toISOString()
+	appendLiveLog(live, `\n[Result]: CANCELED (stopped by user)\n`)
+	return stopped
 }
