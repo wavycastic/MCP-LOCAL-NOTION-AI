@@ -1,20 +1,27 @@
 import { z } from "zod"
-import { run } from "../exec.js"
 import { resolveRepo } from "../repos.js"
+import { forceRebuildSymbolIndex } from "../symbolIndex.js"
 
 export const reindexSchema = {
 	repo: z.string().optional().describe("Ten repo (xem list_repos)"),
 }
 
-// Khong co `git reset --hard` o day. Local la nguon su that.
+/*
+ * Ep build lai tree-sitter symbol index cua repo, bo qua moi cache.
+ * Index thuong tu invalidate theo repoStamp (HEAD + git status), nen tool nay
+ * chi can khi muon lam tuoi chu dong. Truoc day chay `npx gitnexus analyze` —
+ * da bo GitNexus, index gio nam trong process.
+ */
 export async function reindex(a: { repo?: string }) {
 	const repo = resolveRepo(a.repo)
-	const r = await run([...repo.reindex], { cwd: repo.root, timeoutMs: 1_800_000 })
+	const t0 = Date.now()
+	const idx = await forceRebuildSymbolIndex(repo.root)
 	return {
 		repo: repo.name,
-		command: repo.reindex.join(" "),
-		exit_code: r.code,
-		timed_out: r.timedOut,
-		output: r.stdout.slice(-20_000),
+		symbol_index: idx !== null,
+		files: idx?.fileCount ?? 0,
+		symbols: idx?.defCount ?? 0,
+		elapsed_ms: Date.now() - t0,
+		...(idx ? {} : { note: "repo khong co file thuoc ngon ngu ho tro — trace_flow dung heuristic ripgrep" }),
 	}
 }

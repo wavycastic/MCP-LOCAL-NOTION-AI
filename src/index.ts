@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import express from "express"
+import compression from "compression"
 import { createHash, timingSafeEqual } from "node:crypto"
 import {
 	ALLOW_PUSH,
@@ -16,6 +17,7 @@ import { killAllPtySessions } from "./ptySessions.js"
 import { lockState } from "./lock.js"
 import { allRepos } from "./repos.js"
 import { registerAll } from "./tools/index.js"
+import { prewarmHeads } from "./contextCache.js"
 
 /**
  * So sanh token sau khi bam SHA-256.
@@ -73,6 +75,17 @@ app.use((req, res, next) => {
  */
 app.use("/mcp", express.json({ limit: "8mb" }))
 
+// Nen gzip cho payload lon (get_feature_context/analyze_feature tra hang tram KB qua tunnel).
+// Chi nen JSON response — khong duoc dem buffer SSE stream (text/event-stream).
+app.use(
+	"/mcp",
+	compression({
+		// level 1: payload tram KB qua tunnel can TOC DO nen hon ty le nen.
+		level: 1,
+		filter: (_req, res) => /json/.test(String(res.getHeader("content-type") ?? "")),
+	}),
+)
+
 /** Chi tiet lock (co duong dan) chi cho nguoi da co token. */
 app.get("/locks", (_req, res) => {
 	res.json({ locks: lockState() })
@@ -115,13 +128,28 @@ const httpServer = app.listen(PORT, HOST, () => {
 	} catch (e) {
 		console.error("khong load duoc danh sach repo:", e)
 	}
+	// Lay san git HEAD cua tung repo cho tang cache context — query dau tien khoi phai
+	// spawn them 1 tien trinh git. Fire-and-forget: loi thi query dau tu lay lai.
+	prewarmHeads().catch(() => {})
+
+	// Warm san symbol index (tree-sitter) cho moi repo o background: query
+	// trace_flow/get_feature_context dau tien sau khoi dong se hit disk/RAM cache
+	// (~50ms) thay vi tra cold build (~800ms). Tran 2 repo mot luc de khong do bo
+	// CPU ngay luc boot. Dynamic import giu startup path khong keo them module.
+	// Fire-and-forget nhu prewarmHeads: loi bat ky thi query dau tu build lai,
+	// khong bao gio lam sap server (getSymbolIndex von khong throw).
+	void (async () => {
+		const { mapLimit } = await import("./files/concurrency.js")
+		const { getSymbolIndex } = await import("./symbolIndex.js")
+		await mapLimit(allRepos(), 2, (r) => getSymbolIndex(r.root))
+	})().catch(() => {})
 })
 
 /**
  * Tat server: phai giet cac job dang chay TRUOC khi thoat.
  *
  * Truoc day chi dong HTTP server roi exit(0). `dotnet build` hay
- * `npx gitnexus analyze` la tien trinh con, khong chet theo cha tren Windows:
+ * `npm test` la tien trinh con, khong chet theo cha tren Windows:
  * chung chay tiep, giu khoa file trong repo (bin/obj), va khong con ai doc duoc
  * ket qua vi bang job da bay cung process. Ctrl+C hai lan van thoat ngay duoc.
  */

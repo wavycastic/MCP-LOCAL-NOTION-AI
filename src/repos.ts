@@ -1,10 +1,9 @@
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, realpathSync, watch } from "node:fs"
 import { basename, join } from "node:path"
 import {
 	AUTO_DISCOVERED_WRITE,
 	ALLOW_FULL_ACCESS,
 	DEFAULT_BRANCH_PREFIX,
-	DEFAULT_REINDEX_CMD,
 	REPOS_CONFIG,
 	WORKSPACE_ROOT,
 } from "./config.js"
@@ -20,7 +19,6 @@ export type Repo = {
 	test?: string[]
 	lint?: string[]
 	typecheck?: string[]
-	reindex: string[]
 	toolchain: string
 	source: "config" | "discovered" | "system"
 }
@@ -34,18 +32,17 @@ type RepoEntry = {
 	test?: string[]
 	lint?: string[]
 	typecheck?: string[]
-	reindex?: string[]
 }
 
 type ReposFile = {
-	defaults?: { branchPrefix?: string; reindex?: string[] }
+	defaults?: { branchPrefix?: string }
 	repos?: RepoEntry[]
 }
 
 export class RepoError extends Error {}
 
-let cache: { at: number; repos: Repo[] } | null = null
-const CACHE_MS = 10_000
+let cache: { repos: Repo[] } | null = null
+let watchersArmed = false
 
 function readConfig(): ReposFile {
 	if (!existsSync(REPOS_CONFIG)) return {}
@@ -72,7 +69,6 @@ function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["sour
 		["test", entry.test],
 		["lint", entry.lint],
 		["typecheck", entry.typecheck],
-		["reindex", entry.reindex],
 	] as const) {
 		if (v !== undefined && !isArgv(v))
 			throw new RepoError(`repo "${name}": ${k} phai la mang argv, vd ["dotnet","build"]`)
@@ -87,7 +83,6 @@ function build(entry: RepoEntry, dflt: ReposFile["defaults"], source: Repo["sour
 		test: entry.test ?? tc.test,
 		lint: entry.lint ?? tc.lint,
 		typecheck: entry.typecheck ?? tc.typecheck,
-		reindex: entry.reindex ?? dflt?.reindex ?? DEFAULT_REINDEX_CMD,
 		toolchain: tc.kind,
 		source,
 	}
@@ -119,7 +114,7 @@ function assertUniqueNames(repos: Repo[]): void {
 
 /** Repo khai bao trong repos.json + repo tim thay trong WORKSPACE_ROOT. Config thang. */
 export function allRepos(): Repo[] {
-	if (cache && Date.now() - cache.at < CACHE_MS) return cache.repos
+	if (cache) return cache.repos
 
 	const cfg = readConfig()
 	const byRoot = new Map<string, Repo>()
@@ -148,7 +143,6 @@ export function allRepos(): Repo[] {
 			root: "__FULL_ACCESS__",
 			write: true,
 			branchPrefix: "*",
-			reindex: DEFAULT_REINDEX_CMD,
 			toolchain: "system",
 			source: "system",
 		})
@@ -156,13 +150,35 @@ export function allRepos(): Repo[] {
 
 	const repos = [...byRoot.values()].sort((a, b) => a.name.localeCompare(b.name))
 	assertUniqueNames(repos) // truoc khi cache: cau hinh sai thi khong duoc "dinh" lai
-	cache = { at: Date.now(), repos }
+	cache = { repos }
+	armWatchers()
 	return repos
 }
 
-/** Xoa cache — goi khi vua clone repo moi ma khong muon doi 10s. */
+/*
+ * Cache KHONG TTL: chi bi xoa khi repos.json hoac WORKSPACE_ROOT thay doi
+ * (fs.watch), hoac list_repos(refresh=true). Truoc day quet lai moi 10s —
+ * realpathSync + detectToolchain dong bo ngay tren request path.
+ */
 export function invalidateRepoCache() {
 	cache = null
+}
+
+/** Theo doi nguon cau hinh repo: co thay doi la invalidate. Loi watch bi bo qua. */
+function armWatchers(): void {
+	if (watchersArmed) return
+	watchersArmed = true
+	try {
+		// Event 'error' cua FSWatcher la bat dong bo (vd thu muc bi xoa khi dang
+		// watch): khong co handler thi Node nem Unhandled 'error' event va SAP
+		// ca process — da xay ra o benchmark fixture (tmpdir bi rmSync).
+		watch(REPOS_CONFIG, { persistent: false }, () => invalidateRepoCache()).on("error", () => {})
+	} catch {}
+	if (WORKSPACE_ROOT) {
+		try {
+			watch(WORKSPACE_ROOT, { persistent: false }, () => invalidateRepoCache()).on("error", () => {})
+		} catch {}
+	}
 }
 
 /**

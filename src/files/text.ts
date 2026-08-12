@@ -41,6 +41,27 @@ export function detectEol(text: string): "lf" | "crlf" {
 	return crlfCount >= lfTotal - crlfCount ? "crlf" : "lf"
 }
 
+/*
+ * sha256 la getter LAZY: nhieu caller (get_feature_context, trace_flow,
+ * symbol index) doc file ma khong can hash — truoc day van tra phi bam toan bo
+ * file moi lan doc. Chi khi nao truy cap .sha256 moi tinh (1 lan, cache lai).
+ */
+function makeSnapshot(buffer: Buffer, text: string, bom: boolean, mode?: number): TextSnapshot {
+	let cached: string | undefined
+	return {
+		buffer,
+		text,
+		get sha256() {
+			cached ??= hashBuffer(buffer)
+			return cached
+		},
+		sizeBytes: buffer.length,
+		bom,
+		eol: detectEol(text),
+		mode,
+	}
+}
+
 /** Async variant used by bounded-parallel batch tools. */
 export async function readTextSnapshotAsync(abs: string): Promise<TextSnapshot> {
 	const [buffer, st] = await Promise.all([
@@ -48,15 +69,7 @@ export async function readTextSnapshotAsync(abs: string): Promise<TextSnapshot> 
 		stat(abs).catch(() => undefined),
 	])
 	const { text, bom } = decodeStrictUtf8(buffer)
-	return {
-		buffer,
-		text,
-		sha256: hashBuffer(buffer),
-		sizeBytes: buffer.length,
-		bom,
-		eol: detectEol(text),
-		mode: st?.mode,
-	}
+	return makeSnapshot(buffer, text, bom, st?.mode)
 }
 
 export function readTextSnapshot(abs: string): TextSnapshot {
@@ -67,16 +80,5 @@ export function readTextSnapshot(abs: string): TextSnapshot {
 	} catch {}
 
 	const { text, bom } = decodeStrictUtf8(buffer)
-	const sha256 = hashBuffer(buffer)
-	const eol = detectEol(text)
-
-	return {
-		buffer,
-		text,
-		sha256,
-		sizeBytes: buffer.length,
-		bom,
-		eol,
-		mode,
-	}
+	return makeSnapshot(buffer, text, bom, mode)
 }
