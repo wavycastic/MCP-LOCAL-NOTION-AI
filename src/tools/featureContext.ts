@@ -167,7 +167,7 @@ async function grepJson(
 		const msg = e instanceof Error ? e.message : String(e)
 		if (!msg.includes("ENOENT")) throw e
 		// Fallback git grep: 1 process -n; counts suy ra tu so dong match.
-		const gg = ["git", "grep", "--line-number", "--no-color"]
+		const gg = ["git", "grep", "--line-number", "--no-color", "--untracked"]
 		if (a.ignore_case) gg.push("-i")
 		gg.push("-e", a.query, "--", ...(a.glob ? [a.glob] : []), ...DENY_PATHSPECS)
 		const r = await run(gg, { cwd: root, timeoutMs: 60_000 })
