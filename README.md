@@ -1,17 +1,17 @@
 # MCP-LOCAL-NOTION-AI
 
-Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), dùng để Notion AI kết nối trực tiếp tới các repository mã nguồn trên máy của bạn thông qua mục MCP tùy chỉnh (custom MCP) của Notion. Server cung cấp các công cụ đọc mã nguồn, chỉnh sửa tệp tin ngầm và nguyên tử, thực thi lệnh build/test, commit Git và mở phiên Terminal/PTY tương tác.
+A local Model Context Protocol (MCP) server that lets Notion AI connect directly to source repositories on your own machine through Notion's custom MCP connector. It provides source-code reading, atomic file editing, build/test execution, Git commits, and interactive Terminal/PTY sessions.
 
 > [!NOTE]
-> Server dùng giao thức MCP chuẩn qua Streamable HTTP nên về mặt kỹ thuật client MCP khác cũng có thể gọi được, nhưng repo này chỉ xây dựng và kiểm thử cho Notion AI. Antigravity CLI trong repo này là sub-agent do server gọi ra, không phải client kết nối vào.
+> The server speaks standard MCP over Streamable HTTP, so technically other MCP clients could call it, but this repo is built and tested for Notion AI only. The Antigravity CLI in this repo is a sub-agent spawned by the server, not an inbound client.
 
 > [!IMPORTANT]
-> **Tài liệu được đối chiếu trực tiếp với mã nguồn thực tế (phiên bản v0.3.0).**
-> Server hiện đăng ký **48 công cụ MCP** chính thức, hỗ trợ kiểm soát đường dẫn theo repository, bảo vệ branch, ghi tệp nguyên tử, xác thực Bearer token an toàn và các phương thức thực thi qua Node.js CLI hoặc ứng dụng Electron Desktop.
+> **Docs are verified against the actual source (v0.3.0).**
+> The server registers **48 official MCP tools**, with per-repo path confinement, branch protection, atomic file writes, timing-safe Bearer token auth, and execution via Node.js CLI or the Electron desktop app.
 
 ---
 
-## 1. Kiến trúc hệ thống
+## 1. System architecture
 
 ```mermaid
 flowchart TD
@@ -24,15 +24,15 @@ flowchart TD
     SubGraphLocks["Repo Lock Manager (withLock)"]
     
     SubGraphTools["48 Tools Registry"]
-    DiscoveryTools["Phân nhóm: Đọc & khám phá (9)"]
-    EditTools["Phân nhóm: Chỉnh sửa & patch (7)"]
-    GitTools["Phân nhóm: Thao tác Git (9)"]
-    BuildTools["Phân nhóm: Build, test & job (6)"]
-    TermTools["Phân nhóm: Terminal & PTY (8)"]
-    SubAgentTools["Phân nhóm: Antigravity Sub-agent (5)"]
-    SysTools["Phân nhóm: Hệ thống & metrics (4)"]
+    DiscoveryTools["Read & explore (9)"]
+    EditTools["Edit & patch (7)"]
+    GitTools["Git operations (9)"]
+    BuildTools["Build, test & jobs (6)"]
+    TermTools["Terminal & PTY (8)"]
+    SubAgentTools["Antigravity sub-agent (5)"]
+    SysTools["System & metrics (4)"]
 
-    Security["Giới hạn đường dẫn & danh sách cấm"]
+    Security["Path confinement & deny-list"]
     LocalRepos["Local Repositories (FileSystem / Git)"]
 
     Client -->|Bearer Auth| Tunnel
@@ -56,77 +56,77 @@ flowchart TD
     Security --> LocalRepos
 ```
 
-### Các thành phần chính
-- **Express HTTP Server**: Tiếp nhận kết nối HTTP Streamable Transport tại endpoint `/mcp` với middleware kiểm tra Bearer token timing-safe.
-- **Tool Registry**: Đăng ký và quản lý 45 công cụ MCP, lọc theo 4 profile cấu hình (`full`, `agent`, `core`, `safe`).
-- **Path Resolver & Security**: Đảm bảo mọi đường dẫn tệp đều được phân giải (resolve) và xác minh nằm trong thư mục gốc của repository chỉ định, ngăn chặn path traversal (`../`), symlink escape và kiểm tra danh sách cấm (Deny-List).
-- **Repo Lock Manager**: Quản lý khóa độc quyền theo từng repository (`withLock`) để tránh xung đột ghi tệp và tranh chấp dữ liệu khi có nhiều yêu cầu đồng thời.
-- **PTY Session Manager**: Quản lý các phiên terminal tương tác kéo dài (`node-pty`) có hỗ trợ ring buffer, bộ đếm byte cursor và tự động dọn dẹp khi hết thời gian chờ.
-- **Tree-sitter Symbol Index**: Lập chỉ mục symbol trong tiến trình (TS/JS/C#/Python/Go/Rust), tự vô hiệu theo `repoStamp`, warm ngầm ngay khi server khởi động (startup prewarm) và sau mỗi `git_commit` — không cần indexer bên ngoài.
-- **Ứng dụng Electron Desktop**: Cung cấp giao diện đồ họa kèm khay hệ thống (System Tray) để quản lý khởi chạy MCP server và Cloudflare tunnel.
+### Core components
+- **Express HTTP server**: Accepts Streamable Transport connections at `/mcp` with timing-safe Bearer token middleware.
+- **Tool registry**: Registers and manages 48 MCP tools, filtered by 4 config profiles (`full`, `agent`, `core`, `safe`).
+- **Path resolver & security**: Every file path is resolved and verified to stay inside the target repo root. Rejects absolute paths (except the `system` repo), path traversal (`../`), symlink escapes, and deny-listed entries.
+- **Repo lock manager**: Per-repo exclusive locks (`withLock`) prevent concurrent write conflicts when several requests arrive at once.
+- **PTY session manager**: Long-lived interactive terminal sessions (`node-pty`) with ring buffer, byte cursor, and idle-timeout cleanup.
+- **Tree-sitter symbol index**: In-process symbol index (TS/JS/C#/Python/Go/Rust), auto-invalidated by `repoStamp`, warmed in the background at server boot (startup prewarm) and after every `git_commit` — no external indexer needed.
+- **Electron desktop app**: Tray GUI to start the MCP server and the Cloudflare tunnel.
 
 ---
 
-## 2. Yêu cầu hệ thống
+## 2. Requirements
 
-- **Node.js**: `>= 22.5.0` (yêu cầu tính năng `--env-file` native và ESM modules theo `package.json`).
-- **Git**: Đã cài đặt và có trong đường dẫn hệ thống (`PATH`).
-- **Hệ điều hành**: Windows 10/11, macOS, hoặc Linux.
-- **Công cụ tùy chọn theo dự án**:
-  - `ripgrep` (tăng tốc tìm kiếm chuỗi văn bản).
-  - `.NET SDK` / `npm` / `cargo` / `python` (tùy thuộc vào toolchain dự án cần build/test).
-  - `cloudflared` (nếu cần mở Cloudflare Tunnel kết nối tới Notion AI).
+- **Node.js**: `>= 22.5.0` (needs native `--env-file` and ESM modules per `package.json`).
+- **Git**: Installed and on `PATH`.
+- **OS**: Windows 10/11, macOS, or Linux.
+- **Optional, per project**:
+  - `ripgrep` (faster text search).
+  - `.NET SDK` / `npm` / `cargo` / `python` (depends on the project toolchain).
+  - `cloudflared` (only if you expose a Cloudflare Tunnel to Notion AI).
 
 ---
 
-## 3. Cài đặt và khởi chạy
+## 3. Install and run
 
-### Cách 1: Chạy trực tiếp qua Node.js (CLI)
+### Option 1: Node.js CLI
 
 ```bash
-# 1. Cài đặt các gói phụ thuộc
+# 1. Install dependencies
 npm install
 
-# 2. Tạo file cấu hình môi trường từ mẫu
+# 2. Create env config from the template
 cp .env.example .env
-# Chỉnh sửa MCP_TOKEN trong .env thành chuỗi ngẫu nhiên an toàn
+# Edit MCP_TOKEN in .env to a random secure string
 
-# 3. Tạo file khai báo danh sách repo
+# 3. Declare your repo list
 cp repos.example.json repos.json
 
-# 4. Kiểm tra kiểu dữ liệu và build
+# 4. Typecheck and build
 npm run typecheck
 npm run build
 
-# 5. Khởi chạy server
+# 5. Start the server
 npm start
-# Hoặc chế độ phát triển: npm run dev
+# Or dev mode: npm run dev
 ```
 
-Kiểm tra liveness của server:
+Check server liveness:
 ```bash
 curl http://127.0.0.1:8765/health
 ```
 
-### Cách 2: Chạy qua ứng dụng Electron Desktop
+### Option 2: Electron desktop app
 
-Giao diện đồ họa hỗ trợ quản lý server, sinh token ngẫu nhiên, xem log và điều khiển Cloudflare Tunnel.
+The GUI manages the server, generates random tokens, shows logs, and controls the Cloudflare Tunnel.
 
 ```bash
-# Khởi chạy giao diện Desktop
+# Launch the desktop UI
 npm run gui
 
-# Đóng gói thành bản Portable trên Windows
+# Package a portable Windows build
 npm run dist:win
 ```
 
 ---
 
-## 4. Cấu hình chi tiết
+## 4. Detailed configuration
 
-### 4.1. Khai báo danh sách repository (`repos.json`)
+### 4.1. Repo list (`repos.json`)
 
-Khi `WORKSPACE_ROOT` không được cấu hình trong `.env`, server chỉ phục vụ các repository được khai báo tường minh trong `repos.json`:
+When `WORKSPACE_ROOT` is not set in `.env`, the server only serves repos explicitly declared in `repos.json`:
 
 ```json
 {
@@ -150,193 +150,194 @@ Khi `WORKSPACE_ROOT` không được cấu hình trong `.env`, server chỉ ph�
 }
 ```
 
-#### Thuộc tính của từng repository:
-- `name`: Tên định danh repo dùng trong tham số lệnh (duy nhất, không phân biệt hoa thường).
-- `path`: Đường dẫn tuyệt đối tới repository local trên máy.
-- `write`: `true` để cho phép ghi tệp, commit; `false` (mặc định) là chỉ đọc.
-- `branchPrefix`: Prefix của Git branch cho phép ghi (ví dụ: `agent/`). Đặt `"*"` hoặc chuỗi rỗng để cho phép ghi trên mọi branch (kể cả `main`/`master`).
-- `build` / `test` / `lint` / `typecheck`: Mảng câu lệnh dạng argv (ví dụ: `["npm", "run", "build"]`). Nếu không khai báo, server tự suy đoán theo toolchain (`npm`, `dotnet`, `cargo`, `go`, `python`, `maven`).
-### 4.2. Tự động phát hiện repository (`WORKSPACE_ROOT`)
+#### Per-repo fields:
+- `name`: Repo identifier used in the tool `repo` parameter (unique, case-insensitive).
+- `path`: Absolute path to the local repository.
+- `write`: `true` allows file writes and commits; `false` (default) is read-only.
+- `branchPrefix`: Git branch prefix allowed for writes (e.g. `agent/`). Use `"*"` or empty string to allow writes on every branch (including `main`/`master`).
+- `build` / `test` / `lint` / `typecheck`: Command arrays in argv form (e.g. `["npm", "run", "build"]`). If omitted, the server infers them from the toolchain (`npm`, `dotnet`, `cargo`, `go`, `python`, `maven`).
 
-Nếu cấu hình `WORKSPACE_ROOT` trong `.env`, tất cả thư mục con trực tiếp chứa thư mục `.git` sẽ tự động được nhận diện.
-- Mặc định các repo tự phát hiện là **chỉ đọc (read-only)**.
-- Đặt `AUTO_DISCOVERED_WRITE=true` nếu muốn mở quyền ghi cho các repo tự phát hiện.
+### 4.2. Auto-discovered repos (`WORKSPACE_ROOT`)
 
-### 4.3. Đọc toàn máy (`ALLOW_FULL_READ`)
+If `WORKSPACE_ROOT` is set in `.env`, every direct child directory containing a `.git` folder is auto-registered.
+- Auto-discovered repos are **read-only** by default.
+- Set `AUTO_DISCOVERED_WRITE=true` to allow writes for them.
 
-Khi `ALLOW_FULL_READ=true`, server thêm repo ảo `system` **chỉ đọc**. Dùng `repo: "system"` với đường dẫn tuyệt đối (`E:/Projects/foo/bar.ts`). Không cần khai báo từng thư mục trong `repos.json`. **Deny-list vẫn chặn** `.env`, SSH keys, `*.pem`.
+### 4.3. Whole-machine read (`ALLOW_FULL_READ`)
 
-Bỏ trống `repo` khi `system` đang bật thì tool đọc sẽ dùng `system`.
+When `ALLOW_FULL_READ=true`, the server adds a read-only virtual `system` repo. Use `repo: "system"` with an absolute path (`E:/Projects/foo/bar.ts`). No per-folder declaration in `repos.json` needed. **The deny-list still blocks** `.env`, SSH keys, `*.pem`.
 
-### 4.4. Chế độ toàn quyền local (`ALLOW_FULL_ACCESS`)
+When `system` is enabled, read tools fall back to `system` if `repo` is left empty.
+
+### 4.4. Whole-machine full access (`ALLOW_FULL_ACCESS`)
 
 > [!CAUTION]
-> **Cảnh báo an toàn quan trọng**: Mặc định `ALLOW_FULL_ACCESS=false` (fail-closed).
-> Khi đặt `ALLOW_FULL_ACCESS=true`, server sẽ tạo một repository ảo tên `system` với root `__FULL_ACCESS__`. Theo mã nguồn `src/security/paths.ts` (dòng 49), chế độ này **hoàn toàn bỏ qua cả giới hạn đường dẫn theo repository lẫn danh sách cấm (Deny-List)**. AI có thể truy cập, đọc và chỉnh sửa bất kỳ tệp tin nào trên toàn bộ máy tính qua đường dẫn tuyệt đối (`C:\...`, `E:\...`), bao gồm cả tệp `.env`, khóa SSH, chứng thư bảo mật. Chỉ bật lựa chọn này trên máy cá nhân khi thực sự cần thiết và tuyệt đối không mở tunnel ra internet khi đang bật chế độ này.
+> **Important safety warning**: Default is `ALLOW_FULL_ACCESS=false` (fail-closed).
+> When `ALLOW_FULL_ACCESS=true`, the server creates a virtual repo named `system` with root `__FULL_ACCESS__`. Per `src/security/paths.ts`, this mode **fully bypasses both per-repo path confinement and the deny-list**. The AI can access, read, and edit any file on the whole machine via absolute paths (`C:\...`, `E:\...`), including `.env` files, SSH keys, and certificates. Enable it only on your personal machine when really needed, and never expose a tunnel to the internet while it is on.
 
 ---
 
-## 5. Danh sách 48 công cụ MCP (Tool Registry)
+## 5. MCP tool registry (48 tools)
 
-Server đăng ký chính xác **48 công cụ MCP** phân làm 7 nhóm chức năng:
+The server registers exactly **48 MCP tools** in 7 functional groups:
 
-### Nhóm 1: Đọc và khám phá mã nguồn (9 công cụ)
-| Công cụ | Mô tả |
+### Group 1: Read & explore source code (9 tools)
+| Tool | Description |
 | :--- | :--- |
-| `list_repos` | Liệt kê các repo đang phục vụ, quyền ghi (`write`) và toolchain. Nên gọi đầu tiên khi chưa biết tên repo. |
-| `read_file` | Đọc 1 tệp tin theo đường dẫn tương đối (hỗ trợ phân trang theo dòng và kiểm tra UTF-8 strict). |
-| `read_many_files` | Đọc từ 1 đến 50 tệp tin cùng lúc trong 1 lệnh gọi để giảm số lượt gửi request. |
-| `list_dir` | Liệt kê cây thư mục (tự động bỏ qua `node_modules`, `bin`, `obj`, `dist`, `.git`). |
-| `glob_files` | Tìm đường dẫn tệp theo mẫu pattern glob (cache kết quả theo `repoStamp`; các tool ghi tự invalidate ngay). |
-| `ripgrep` | Tìm kiếm chuỗi/regex trong codebase (hỗ trợ `all_repos: true` để tìm xuyên các repo). |
-| `get_feature_context` | Gộp glob+grep+đọc file thành 1 lệnh gọi: nhập query, nhận toàn bộ file liên quan trong 1 payload (3 mức chi tiết `detail`: L0 danh sách, L1 outline+đoạn quanh match, L2 nguyên file; cache theo git HEAD + fingerprint). |
-| `trace_flow` | Lần luồng thực thi của 1 symbol trong 1 lệnh gọi: định nghĩa (kèm body), nơi gọi nó (callers), nó gọi gì (callees, hỗ trợ `depth: 2`). |
-| `analyze_feature` | 1 lệnh gọi duy nhất cho câu hỏi về 1 chức năng: gộp tìm file liên quan + lần luồng gọi symbol chính (tự đoán từ query hoặc truyền `symbol`). |
+| `list_repos` | List served repos, write permission (`write`), and toolchain. Call first when the repo name is unknown. |
+| `read_file` | Read one file by relative path (line pagination, strict UTF-8 check). |
+| `read_many_files` | Read 1–50 files in a single call to reduce round-trips. |
+| `list_dir` | List directory tree (skips `node_modules`, `bin`, `obj`, `dist`, `.git`). |
+| `glob_files` | Find file paths by glob pattern (results cached by `repoStamp`; write tools invalidate immediately). |
+| `ripgrep` | Search strings/regex in the codebase (`all_repos: true` searches across repos). |
+| `get_feature_context` | Combine glob+grep+read into one call: pass a query, get all related files in one payload (3 `detail` levels: L0 list, L1 outline+match context, L2 full file; cached by git HEAD + fingerprint). |
+| `trace_flow` | Trace one symbol's execution flow in one call: definition (with body), callers, callees (`depth: 2` supported). |
+| `analyze_feature` | Single call for a feature question: related files + main-symbol call flow (auto-detects the symbol from the query or accepts `symbol`). |
 
-### Nhóm 2: Chỉnh sửa tệp và áp dụng patch (7 công cụ)
-| Công cụ | Mô tả |
+### Group 2: Edit files & apply patches (7 tools)
+| Tool | Description |
 | :--- | :--- |
-| `edit_file` | Thay thế 1 vị trí văn bản trong 1 tệp (`old_str` -> `new_str`), bảo toàn CRLF/LF và BOM. Response kèm `context` (~11 dòng quanh vết sửa) để verify ngay, khỏi gọi lại `read_file`. |
-| `multi_edit_file` | Thay thế nhiều vị trí không liên tục trong 1 tệp ngầm nguyên tử (tự động rollback nếu có khối lỗi). Response kèm `context` quanh vết sửa đầu tiên. |
-| `apply_patch` | Áp dụng unified diff patch đa tệp (Add, Update, Move, Delete) có hỗ trợ dry-run và rollback nguyên tử. |
-| `create_file` | Tạo tệp mới hoàn toàn (từ chối ghi đè nếu tệp đã tồn tại). |
-| `move_file` | Đổi tên hoặc di chuyển tệp bằng `git mv` (giữ lịch sử commit). |
-| `remove_file` | Xóa tệp đã track bằng `git rm`. |
-| `git_restore` | Phục hồi 1 tệp cụ thể về trạng thái commit `HEAD` ban đầu (từ chối đường dẫn wildcard và thư mục). |
+| `edit_file` | Replace one text span in one file (`old_str` -> `new_str`), preserving CRLF/LF and BOM. The response includes ~11 lines of `context` around the edit so you can verify without calling `read_file` again. |
+| `multi_edit_file` | Replace several non-contiguous spans in one file, atomically (auto-rollback if any block fails). The response includes `context` around the first edit. |
+| `apply_patch` | Apply a multi-file unified diff patch (Add, Update, Move, Delete) with dry-run and atomic rollback. |
+| `create_file` | Create a brand-new file (refuses to overwrite an existing file). |
+| `move_file` | Rename or move a file with `git mv` (keeps history). |
+| `remove_file` | Delete a tracked file with `git rm`. |
+| `git_restore` | Restore one specific file to `HEAD` (rejects wildcards and directories). |
 
-### Nhóm 3: Build, test và quản lý tiến trình ngầm (6 công cụ)
-| Công cụ | Mô tả |
+### Group 3: Build, test & background jobs (6 tools)
+| Tool | Description |
 | :--- | :--- |
-| `run_build` | Chạy lệnh build mặc định của repo (`npm run build`, `dotnet build`, ...). |
-| `run_tests` | Chạy bộ unit test mặc định của repo (`npm test`, `dotnet test`, ...). |
-| `run_lint` | Chạy linter mặc định (`eslint`, `cargo clippy`, ...). |
-| `run_typecheck` | Chạy kiểm tra kiểu dữ liệu (`tsc`, `mypy`, ...). |
-| `job_status` | Trả về trạng thái và log kết quả của 1 background job đang/đã thực thi. |
-| `kill_job` | Tiêu diệt tiến trình cha và toàn bộ cây tiến trình con của 1 background job. |
+| `run_build` | Run the repo's default build (`npm run build`, `dotnet build`, ...). |
+| `run_tests` | Run the repo's default unit tests (`npm test`, `dotnet test`, ...). |
+| `run_lint` | Run the default linter (`eslint`, `cargo clippy`, ...). |
+| `run_typecheck` | Run type checking (`tsc`, `mypy`, ...). |
+| `job_status` | Return the status and logs of a running/finished background job. |
+| `kill_job` | Kill a background job's parent process and its whole child tree. |
 
-### Nhóm 4: Thao tác Git (9 công cụ)
-| Công cụ | Mô tả |
+### Group 4: Git operations (9 tools)
+| Tool | Description |
 | :--- | :--- |
-| `git_status` | Xem trạng thái working tree (clean/dirty), staged files và branch hiện tại. |
-| `git_branch` | Liệt kê các branch, tạo branch mới (kiểm tra quyền ghi và `branchPrefix`), hoặc chuyển sang branch đã có sẵn (không kiểm tra prefix khi chuyển, nhưng các thao tác ghi sau đó trên branch này sẽ bị `assertWritableBranch` kiểm tra). |
-| `git_stash` | Lưu tạm (stash) hoặc khôi phục các thay đổi chưa commit. |
-| `git_diff` | Xem thay đổi chi tiết (diff) so với HEAD hoặc staged. |
-| `git_log` | Xem lịch sử các commit gần đây. |
-| `git_blame` | Xem lịch sử chỉnh sửa theo từng dòng của 1 tệp. |
-| `git_commit` | Tạo commit (mặc định chỉ stage các tệp do các công cụ MCP sửa đổi; tự động kích hoạt re-index ngầm trừ khi đặt `reindex: false`). |
-| `git_push` | Push branch hiện tại lên remote (yêu cầu `ALLOW_PUSH=true`). |
-| `gh_pr` | Quản lý, tạo hoặc xem GitHub Pull Request qua GitHub CLI (`gh`). |
+| `git_status` | Show working-tree status (clean/dirty), staged files, and current branch. |
+| `git_branch` | List branches, create a new branch (checks write permission and `branchPrefix`), or switch to an existing branch (no prefix check on switch, but later writes on that branch still go through `assertWritableBranch`). |
+| `git_stash` | Stash or restore uncommitted changes. |
+| `git_diff` | Show detailed diff vs HEAD or staged. |
+| `git_log` | Show recent commit history. |
+| `git_blame` | Show per-line edit history of one file. |
+| `git_commit` | Create a commit (by default only stages files modified by MCP tools; triggers background re-index unless `reindex: false`). |
+| `git_push` | Push the current branch to the remote (requires `ALLOW_PUSH=true`). |
+| `gh_pr` | Manage, create, or view GitHub Pull Requests via GitHub CLI (`gh`). |
 
-### Nhóm 5: Terminal và PTY tương tác (8 công cụ)
-| Công cụ | Mô tả |
+### Group 5: Interactive terminal & PTY (8 tools)
+| Tool | Description |
 | :--- | :--- |
-| `terminal` | Chạy 1 lệnh shell đơn lẻ (stateless) trong thư mục repo và trả kết quả ngay. |
-| `terminal_start` | Mở phiên PTY/ConPTY tương tác kéo dài (stateful) để chạy các lệnh tương tác. |
-| `terminal_write` | Gửi raw input hoặc phím điều khiển (`Ctrl+C`, `Enter`) vào phiên PTY. |
-| `terminal_read` | Đọc luồng output mới từ PTY theo byte cursor tăng dần (không lặp lại output cũ). |
-| `terminal_wait_for` | Đợi chuỗi/regex xuất hiện trong output PTY (long-poll trong 1 MCP call). |
-| `terminal_resize` | Đổi kích thước cửa sổ hiển thị PTY. |
-| `terminal_close` | Đóng và kết thúc phiên PTY. |
-| `terminal_list` | Liệt kê các phiên PTY đang hoạt động. |
+| `terminal` | Run one stateless shell command in the repo folder and return the result immediately. |
+| `terminal_start` | Open a long-lived interactive PTY/ConPTY session (stateful) for interactive commands. |
+| `terminal_write` | Send raw input or control keys (`Ctrl+C`, `Enter`) to a PTY session. |
+| `terminal_read` | Read new output from a PTY by increasing byte cursor (no repeated output). |
+| `terminal_wait_for` | Wait for a string/regex in PTY output (long-poll within one MCP call). |
+| `terminal_resize` | Resize the PTY window. |
+| `terminal_close` | Close and terminate a PTY session. |
+| `terminal_list` | List active PTY sessions. |
 
-### Nhóm 6: Tích hợp Antigravity Sub-agent (5 công cụ)
-| Công cụ | Mô tả |
+### Group 6: Antigravity sub-agent integration (5 tools)
+| Tool | Description |
 | :--- | :--- |
-| `antigravity_spawn` | Khởi chạy Antigravity sub-agent ngầm qua CLI (`agy`) cho các tác vụ phức tạp. |
-| `antigravity_poll` | Đọc tiến độ, sự kiện tool call và kết quả phản hồi của sub-agent. |
-| `antigravity_reply` | Gửi tiếp lượt hội thoại vào phiên sub-agent hiện tại. |
-| `antigravity_stop` | Dừng tiến trình sub-agent. |
-| `antigravity_list` | Liệt kê các phiên sub-agent đang hoạt động. |
+| `antigravity_spawn` | Launch a background Antigravity sub-agent via CLI (`agy`) for complex tasks. |
+| `antigravity_poll` | Read sub-agent progress, tool-call events, and responses. |
+| `antigravity_reply` | Send the next conversation turn into the current sub-agent session. |
+| `antigravity_stop` | Stop a sub-agent process. |
+| `antigravity_list` | List active sub-agent sessions. |
 
-### Nhóm 7: Hệ thống và thống kê (4 công cụ)
-| Công cụ | Mô tả |
+### Group 7: System & stats (4 tools)
+| Tool | Description |
 | :--- | :--- |
-| `reindex` | Ép build lại tree-sitter symbol index trong tiến trình, bỏ qua mọi cache (index thường tự invalidate theo `repoStamp` — chỉ cần khi muốn làm tươi chủ động). |
-| `health_check` | Liveness probe: Uptime, PID, phiên bản Node.js. |
-| `readiness_check` | Readiness probe: Kiểm tra tính hợp lệ của cấu hình và danh sách repo. |
-| `get_metrics` | Lấy thống kê số lượt gọi công cụ, thời gian thực thi và danh sách phiên PTY. |
+| `reindex` | Force a rebuild of the in-process tree-sitter symbol index, skipping all caches (the index normally invalidates itself by `repoStamp` — only call this for a manual refresh). |
+| `health_check` | Liveness probe: uptime, PID, Node.js version. |
+| `readiness_check` | Readiness probe: config validity and repo list. |
+| `get_metrics` | Tool-call counts, execution times, and PTY session list. |
 
 ---
 
-## 6. Phân vùng profile công cụ (`TOOL_PROFILE`)
+## 6. Tool profiles (`TOOL_PROFILE`)
 
-Biến môi trường `TOOL_PROFILE` trong `src/config.ts` cho phép giới hạn danh sách công cụ mở ra cho AI client:
+The `TOOL_PROFILE` env var in `src/config.ts` limits which tools are exposed to the AI client:
 
-- **`full`** (Mặc định): Mở toàn bộ **48 công cụ**.
-- **`core`**: Mở **31 công cụ cơ bản** (`CORE_ALLOWED` trong `src/tools/index.ts`), ẩn các công cụ chỉnh sửa patch/file nâng cao (`apply_patch`, `move_file`, `remove_file`), `git_push`, `gh_pr`, `kill_job` và các công cụ terminal thực thi lệnh (`terminal`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_resize`, `terminal_close`, `terminal_list`), nhưng **vẫn mở `terminal_wait_for`**.
-- **`agent`**: Mở **9 công cụ tích hợp** (`AGENT_ALLOWED`), tập trung vào `list_repos`, `apply_patch`, `run_typecheck`, `run_tests`, `git_status`, `git_diff` và bộ công cụ sub-agent.
-- **`safe`**: Tự động ẩn các công cụ có đánh dấu `destructive: true`, `openWorld: true` hoặc `git_push`.
-
----
-
-## 7. Quy tắc an toàn và kiểm soát rủi ro
-
-1. **Xác thực token timing-safe**: Mọi request tới `/mcp` đều phải có Header `Authorization: Bearer <MCP_TOKEN>`. Việc so sánh token được thực hiện bằng cách băm SHA-256 trước khi gọi `timingSafeEqual` để loại bỏ tấn công kênh thời gian (Timing Attack).
-2. **Giới hạn đường dẫn theo repository (Path confinement)**: Đường dẫn tệp được phân giải (`safeResolve`) và xác minh nằm trong thư mục gốc của repository tương ứng. Hệ thống tự động từ chối đường dẫn tuyệt đối, path traversal (`../`) và symlink trỏ ra ngoài repo.
-3. **Danh sách cấm (Deny-List)**: Chặn thao tác đọc/ghi tới `.env` (trừ các file mẫu như `.env.example`), `.git/config`, `.git/hooks/`, SSH keys, private keys (`.pem`, `.key`, `.pfx`), file chứa thông tin nhạy cảm (`secrets/`). *(Lưu ý: Deny-List bị bỏ qua nếu bật `ALLOW_FULL_ACCESS=true`. `ALLOW_FULL_READ` vẫn giữ Deny-List.)*.
-4. **Bảo vệ Git branch (Branch Guard)**: Thao tác ghi/commit chỉ được phép thực hiện trên các branch có tên bắt đầu bằng `branchPrefix` được cấu hình cho repo (mặc định `agent/`), hoặc trên mọi branch khi `branchPrefix` được cấu hình là `""` hoặc `"*"`.
-5. **Ghi tệp nguyên tử và bảo toàn định dạng**: Thực hiện I/O qua UTF-8 strict (`fatal: true`), loại bỏ ký tự NUL, ghi qua file tạm `.tmp` rồi đổi tên nguyên tử (atomic rename). Bảo toàn ký tự dòng kết thúc (CRLF/LF), ký tự BOM và phân quyền tệp.
-6. **Xác minh hash chống trạng thái cũ / xung đột ghi đồng thời (Stale-write guard / Optimistic concurrency)**: Hỗ trợ kiểm tra `expected_sha256` hoặc `expected_head_sha` trước khi sửa tệp/patch. Nếu tệp bị sửa đổi song song, lệnh sẽ bị từ chối mà không làm lộ nội dung thực tế.
-7. **Làm sạch môi trường Terminal**: Khi `TERMINAL_INHERIT_SECRETS=false` (mặc định), tiến trình con terminal sẽ tự động bị loại bỏ các biến môi trường chứa bí mật (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `CREDENTIAL`, `MCP_TOKEN`). Nếu đặt `TERMINAL_INHERIT_SECRETS=true`, các biến bí mật này sẽ được truyền nguyên vẹn cho tiến trình terminal con.
+- **`full`** (default): All **48 tools**.
+- **`core`**: **31 basic tools** (`CORE_ALLOWED` in `src/tools/index.ts`). Hides advanced patch/file tools (`apply_patch`, `move_file`, `remove_file`), `git_push`, `gh_pr`, `kill_job`, and command-execution terminal tools (`terminal`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_resize`, `terminal_close`, `terminal_list`), but **keeps `terminal_wait_for`**.
+- **`agent`**: **9 integration tools** (`AGENT_ALLOWED`), focused on `list_repos`, `apply_patch`, `run_typecheck`, `run_tests`, `git_status`, `git_diff`, and the sub-agent set.
+- **`safe`**: Automatically hides tools marked `destructive: true`, `openWorld: true`, or `git_push`.
 
 ---
 
-## 8. Biến môi trường chi tiết (`.env`)
+## 7. Safety & risk controls
 
-| Biến môi trường | Giá trị mặc định | Mô tả |
+1. **Timing-safe token auth**: Every `/mcp` request must carry `Authorization: Bearer <MCP_TOKEN>`. Both sides are SHA-256 hashed before `timingSafeEqual` to remove timing attacks.
+2. **Per-repo path confinement**: File paths are resolved (`safeResolve`) and verified inside the target repo root. Absolute paths, traversal (`../`), and symlinks escaping the repo are rejected automatically.
+3. **Deny-list**: Blocks reads/writes to `.env` (except templates like `.env.example`), `.git/config`, `.git/hooks/`, SSH keys, private keys (`.pem`, `.key`, `.pfx`), and secret files (`secrets/`). *(Note: bypassed only when `ALLOW_FULL_ACCESS=true`. `ALLOW_FULL_READ` keeps the deny-list.)*.
+4. **Git branch guard**: Writes/commits are allowed only on branches starting with the repo's `branchPrefix` (default `agent/`), or on every branch when `branchPrefix` is `""` or `"*"`.
+5. **Atomic writes with format preservation**: Strict UTF-8 I/O (`fatal: true`), NUL rejection, temp-file + atomic rename. Preserves line endings (CRLF/LF), BOM, and file mode.
+6. **Stale-write guard / optimistic concurrency**: Supports `expected_sha256` or `expected_head_sha` checks before edits/patches. If the file changed concurrently, the command is rejected without leaking content.
+7. **Terminal env sanitizing**: When `TERMINAL_INHERIT_SECRETS=false` (default), child terminal processes strip secret env vars (`TOKEN`, `SECRET`, `PASSWORD`, `API_KEY`, `CREDENTIAL`, `MCP_TOKEN`). Set `TERMINAL_INHERIT_SECRETS=true` to pass them through intact.
+
+---
+
+## 8. Environment variables (`.env`)
+
+| Variable | Default | Description |
 | :--- | :--- | :--- |
-| `MCP_TOKEN` | *(Bắt buộc)* | Token Bearer xác thực truy cập endpoint `/mcp`. |
-| `PORT` | `8765` | Cổng HTTP server lắng nghe. |
-| `HOST` | `127.0.0.1` | Địa chỉ IP bind. |
-| `REPOS_CONFIG` | `repos.json` | Đường dẫn tệp cấu hình danh sách repository. |
-| `WORKSPACE_ROOT` | *(Không)* | Thư mục cha chứa nhiều repo để tự động nhận diện. |
-| `AUTO_DISCOVERED_WRITE` | `false` | Cho phép ghi đối với repo tự động phát hiện. |
-| `ALLOW_FULL_READ` | `false` | Bật repo ảo `system` chỉ đọc (đường dẫn tuyệt đối; deny-list vẫn áp dụng). |
-| `ALLOW_FULL_ACCESS` | `false` | Bật repo ảo `system` kèm ghi, bỏ qua path confinement & Deny-List. |
-| `DEFAULT_BRANCH_PREFIX` | `agent/` | Prefix branch mặc định cho phép ghi (đặt `*` cho mọi branch). |
-| `ALLOW_PUSH` | `false` | Bật/tắt công cụ `git_push`. |
-| `GIT_REMOTE` | `origin` | Tên Git remote mặc định. |
-| `ALLOW_TERMINAL` | `false` | Master kill-switch cho các công cụ terminal. |
-| `TERMINAL_MODE` | `disabled` | Chế độ terminal: `disabled` \| `repo` \| `full`. |
-| `TERMINAL_INHERIT_SECRETS` | `false` | Kế thừa biến môi trường bí mật vào tiến trình terminal con. |
-| `PTY_MAX_SESSIONS` | `8` | Số lượng phiên PTY tối đa được mở đồng thời. |
-| `MAX_READ_BYTES` | `2000000` | Giới hạn dung lượng tệp tối đa khi đọc (2MB). |
-| `MAX_WRITE_BYTES` | `1000000` | Giới hạn dung lượng nội dung tối đa khi ghi (1MB). |
-| `LOCK_WAIT_MS` | `120000` | Thời gian tối đa chờ khóa repo rảnh (120 giây). |
-| `TOOL_PROFILE` | `full` | Profile lọc công cụ: `full` \| `agent` \| `core` \| `safe`. |
-| `ANTIGRAVITY_ENABLE` | `true` | Bật/tắt khả năng thực thi của bộ công cụ `antigravity_*` (khi đặt `false`, các công cụ vẫn nằm trong danh sách đăng ký nhưng sẽ từ chối và trả lỗi khi được gọi). |
+| `MCP_TOKEN` | *(Required)* | Bearer token for `/mcp` endpoint auth. |
+| `PORT` | `8765` | HTTP server port. |
+| `HOST` | `127.0.0.1` | Bind address. |
+| `REPOS_CONFIG` | `repos.json` | Repo-list config file path. |
+| `WORKSPACE_ROOT` | *(Unset)* | Parent folder with many repos for auto-discovery. |
+| `AUTO_DISCOVERED_WRITE` | `false` | Allow writes for auto-discovered repos. |
+| `ALLOW_FULL_READ` | `false` | Enable read-only virtual `system` repo (absolute paths; deny-list still applies). |
+| `ALLOW_FULL_ACCESS` | `false` | Enable writable virtual `system` repo, bypassing path confinement & deny-list. |
+| `DEFAULT_BRANCH_PREFIX` | `agent/` | Default writable branch prefix (use `*` for all branches). |
+| `ALLOW_PUSH` | `false` | Enable/disable the `git_push` tool. |
+| `GIT_REMOTE` | `origin` | Default Git remote name. |
+| `ALLOW_TERMINAL` | `false` | Master kill-switch for terminal tools. |
+| `TERMINAL_MODE` | `disabled` | Terminal mode: `disabled` \| `repo` \| `full`. |
+| `TERMINAL_INHERIT_SECRETS` | `false` | Pass secret env vars into child terminal processes. |
+| `PTY_MAX_SESSIONS` | `8` | Max concurrent PTY sessions. |
+| `MAX_READ_BYTES` | `2000000` | Max file size when reading (2MB). |
+| `MAX_WRITE_BYTES` | `1000000` | Max content size when writing (1MB). |
+| `LOCK_WAIT_MS` | `120000` | Max wait for a free repo lock (120s). |
+| `TOOL_PROFILE` | `full` | Tool filter profile: `full` \| `agent` \| `core` \| `safe`. |
+| `ANTIGRAVITY_ENABLE` | `true` | Enable/disable `antigravity_*` execution (when `false`, tools stay registered but reject calls with an error). |
 
 ---
 
-## 9. Kiểm thử và đánh giá hiệu năng
+## 9. Tests & benchmarks
 
-### 9.1. Kịch bản kiểm thử tích hợp (`smoke.ts`)
+### 9.1. Integration test scenario (`smoke.ts`)
 
-File `scripts/smoke.ts` tạo 2 repository Git tạm thời trong thư mục môi trường biệt lập để thực thi các kiểm thử tích hợp trực tiếp với handler của công cụ (bỏ qua tầng HTTP).
+`scripts/smoke.ts` creates 2 temporary Git repos in an isolated env folder and runs integration tests directly against tool handlers (bypassing HTTP).
 
-Kịch bản smoke test thực tế tập trung xác minh các luồng làm việc chính:
-- Khai báo repo registry và phân quyền read-only / writable.
-- Phân trang đọc tệp, đọc nhiều tệp (`read_many_files`), giới hạn dung lượng byte, lọc tệp binary.
-- Tìm kiếm tệp qua `glob_files` và `ripgrep` (trong repo và xuyên repo).
-- Kiểm tra giới hạn đường dẫn, chống traversal và danh sách cấm (Deny-List).
-- Kiểm tra rào chắn ghi branch (`branchPrefix`).
-- Chỉnh sửa tệp đơn lẻ (`edit_file`), sửa tệp nguyên tử (`multi_edit_file`), rollback khi lỗi và xác minh hash chống trạng thái cũ/xung đột ghi đồng thời.
-- Áp dụng unified diff patch (`apply_patch`) đa tệp, kiểm tra dry-run và các cấp độ rollback tự động khi gặp lỗi mid-commit.
-- Thao tác Git (`git_status`, `git_commit`, `git_restore`, `git_branch`, `git_stash`, `remove_file`).
-- Thực thi Terminal, kiểm tra tính năng sanitize môi trường và quản lý PTY session.
-- Thực thi build/test background job, khóa repo lock đồng thời và kiểm tra dọn dẹp cây tiến trình (`kill_job`).
+The smoke suite verifies the main flows:
+- Repo registry declaration and read-only / writable permissions.
+- File-read pagination, multi-file reads (`read_many_files`), byte limits, binary filtering.
+- File search via `glob_files` and `ripgrep` (in-repo and cross-repo).
+- Path confinement, traversal protection, and deny-list.
+- Write branch guard (`branchPrefix`).
+- Single edits (`edit_file`), atomic multi-edits (`multi_edit_file`), rollback on error, and stale-write hash checks.
+- Multi-file unified diff patches (`apply_patch`), dry-run, and mid-commit auto-rollback levels.
+- Git operations (`git_status`, `git_commit`, `git_restore`, `git_branch`, `git_stash`, `remove_file`).
+- Terminal execution, env sanitizing, and PTY session management.
+- Background build/test jobs, concurrent repo locks, and process-tree cleanup (`kill_job`).
 
-Kết quả kiểm thử khi chạy với môi trường chuẩn:
+Run with the standard env:
 ```powershell
 $env:DEFAULT_BRANCH_PREFIX="agent/"; npm run smoke
 ```
-Trả về kết quả: **`192 pass, 0 fail`** trên tổng số 192 assertion của script `smoke.ts`.
+Result: **`192 pass, 0 fail`** out of 192 `smoke.ts` assertions.
 
-### 9.2. Kết quả đo hiệu năng thực nghiệm (Benchmark)
+### 9.2. Experimental benchmark results
 
-Các số liệu dưới đây được đo lường thực nghiệm bằng `npx tsx scripts/benchmark-tools.ts` trên môi trường máy thử nghiệm (Windows 11, Node.js v22.22.2, 20 lần lặp/case). Số liệu mang tính chất tham khảo thực tế cho môi trường đó, không phải cam kết hiệu năng cố định trên mọi phần cứng:
+Measured with `npx tsx scripts/benchmark-tools.ts` on a test machine (Windows 11, Node.js v22.22.2, 20 iterations/case). Numbers are reference values for that machine, not guarantees for all hardware:
 
-| Kịch bản benchmark | Trung vị (Median) | P95 | Số round trips | Tỷ lệ thành công |
+| Benchmark scenario | Median | P95 | Round trips | Success rate |
 | :--- | :---: | :---: | :---: | :---: |
 | Single edit (`edit_file`) | **2.18 ms** | 3.95 ms | 1 | 100% |
 | 10 edits (10 × `edit_file`) | **16.74 ms** | 17.52 ms | 10 | 100% |
@@ -350,27 +351,27 @@ Các số liệu dưới đây được đo lường thực nghiệm bằng `npx
 | Glob files (Warm Cache) | **0.05 ms** | 13.97 ms | 1 | 100% |
 | Terminal Foreground | **8.92 ms** | 10.01 ms | 1 | 100% |
 
-Kỷ nguyên Tree-sitter Symbol Index + Startup Prewarm + Micro-opts A/B/C (đo bằng `scripts/bench-symbol-index.ts` và `scripts/bench-cv-aut.ts`): symbol index cold build ~0.8s (đã chạy ngầm lúc server boot, không còn nằm trên đường request), disk load ~52ms, `trace_flow` warm ~1ms, `list_dir` warm ~1ms, `edit_file` tự trả snippet context quanh vết sửa (tiết kiệm 1 round-trip `read_file` cho mỗi lần sửa).
+Tree-sitter symbol index era + startup prewarm + micro-opts A/B/C (measured with `scripts/bench-symbol-index.ts` and `scripts/bench-cv-aut.ts`): cold symbol-index build ~0.8s (runs in the background at server boot, off the request path), disk load ~52ms, warm `trace_flow` ~1ms, warm `list_dir` ~1ms, and `edit_file` returns snippet context around edits (saves one `read_file` round-trip per edit).
 
 ---
 
-## 10. Xử lý sự cố (Troubleshooting)
+## 10. Troubleshooting
 
-### Lỗi 1: `401 Unauthorized`
-- **Nguyên nhân**: Header `Authorization` thiếu hoặc không khớp `MCP_TOKEN`.
-- **Xử lý**: Kiểm tra lại `MCP_TOKEN` trong `.env` và cấu hình Header trong client (`Authorization: Bearer <MCP_TOKEN>`).
+### Error 1: `401 Unauthorized`
+- **Cause**: Missing `Authorization` header or mismatched `MCP_TOKEN`.
+- **Fix**: Check `MCP_TOKEN` in `.env` and the client header (`Authorization: Bearer <MCP_TOKEN>`).
 
-### Lỗi 2: `refusing to write in "repo-name" on branch "main"`
-- **Nguyên nhân**: Thao tác ghi bị chặn do branch hiện tại không khớp `branchPrefix` được quy định cho repo (mặc định `agent/`).
-- **Xử lý**: Chuyển sang branch mới bằng `git_branch` (`agent/fix-bug`), hoặc cấu hình `"branchPrefix": "*"` trong `repos.json` cho repo tương ứng.
+### Error 2: `refusing to write in "repo-name" on branch "main"`
+- **Cause**: Writes blocked because the current branch does not match the repo's `branchPrefix` (default `agent/`).
+- **Fix**: Switch to a new branch with `git_branch` (`agent/fix-bug`), or set `"branchPrefix": "*"` in `repos.json` for that repo.
 
-### Lỗi 3: `denied path: .env`
-- **Nguyên nhân**: Truy cập tệp bị Deny-List ngăn chặn để bảo vệ bí mật.
-- **Xử lý**: Đây là tính năng bảo mật mặc định. Nếu cần xem hoặc sửa cấu hình mẫu, hãy thao tác với `.env.example` hoặc `.env.template`.
+### Error 3: `denied path: .env`
+- **Cause**: The deny-list blocked access to protect secrets.
+- **Fix**: This is default security behavior. Work with `.env.example` or `.env.template` for config samples.
 
-### Lỗi 4: Smoke test báo lỗi `FAIL chan ghi khi branch la main`
-- **Nguyên nhân**: File `.env` local của bạn có đặt `DEFAULT_BRANCH_PREFIX=*`, khiến kiểm tra branch guard không bị chặn như kịch bản mong đợi của `smoke.ts`.
-- **Xử lý**: Khởi chạy test kèm biến môi trường ghi đè:
+### Error 4: Smoke test reports `FAIL chan ghi khi branch la main`
+- **Cause**: Your local `.env` sets `DEFAULT_BRANCH_PREFIX=*`, so the branch guard does not block as the `smoke.ts` scenario expects.
+- **Fix**: Run the test with an env override:
   ```powershell
   $env:DEFAULT_BRANCH_PREFIX="agent/"; npm run smoke
   ```
