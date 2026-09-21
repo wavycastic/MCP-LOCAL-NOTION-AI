@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Electron chi dung cho GUI local. CI chi can types, khong can tai binary ~100MB.
+# Binary hay bi 504 tren runner. Bo qua de CI on dinh.
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
 jobs:
   verify:
     name: verify (${{ matrix.os }})
