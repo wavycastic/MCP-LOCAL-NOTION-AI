@@ -1,6 +1,9 @@
-# local-repo-mcp
+# MCP-LOCAL-NOTION-AI
 
-Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), hỗ trợ kết nối các trợ lý AI (Notion AI, Claude, Antigravity CLI, ...) với các repository mã nguồn cục bộ trên máy tính của bạn. Server cung cấp các công cụ đọc mã nguồn, chỉnh sửa tệp tin ngầm và nguyên tử, thực thi lệnh build/test, commit Git và mở phiên Terminal/PTY tương tác.
+Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), dùng để Notion AI kết nối trực tiếp tới các repository mã nguồn trên máy của bạn thông qua mục MCP tùy chỉnh (custom MCP) của Notion. Server cung cấp các công cụ đọc mã nguồn, chỉnh sửa tệp tin ngầm và nguyên tử, thực thi lệnh build/test, commit Git và mở phiên Terminal/PTY tương tác.
+
+> [!NOTE]
+> Server dùng giao thức MCP chuẩn qua Streamable HTTP nên về mặt kỹ thuật client MCP khác cũng có thể gọi được, nhưng repo này chỉ xây dựng và kiểm thử cho Notion AI. Antigravity CLI trong repo này là sub-agent do server gọi ra, không phải client kết nối vào.
 
 > [!IMPORTANT]
 > **Tài liệu được đối chiếu trực tiếp với mã nguồn thực tế (phiên bản v0.3.0).**
@@ -12,7 +15,7 @@ Server MCP (Model Context Protocol) chạy trên máy cá nhân (local), hỗ tr
 
 ```mermaid
 flowchart TD
-    Client["Client (Notion AI / Claude / MCP Client)"]
+    Client["Notion AI (custom MCP connector)"]
     Tunnel["Cloudflare Tunnel / Direct HTTP"]
     Express["Express HTTP Server (port 8765)"]
     Auth["Timing-Safe Bearer Auth (/mcp)"]
