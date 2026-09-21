@@ -159,7 +159,13 @@ Nếu cấu hình `WORKSPACE_ROOT` trong `.env`, tất cả thư mục con trự
 - Mặc định các repo tự phát hiện là **chỉ đọc (read-only)**.
 - Đặt `AUTO_DISCOVERED_WRITE=true` nếu muốn mở quyền ghi cho các repo tự phát hiện.
 
-### 4.3. Chế độ toàn quyền local (`ALLOW_FULL_ACCESS`)
+### 4.3. Đọc toàn máy (`ALLOW_FULL_READ`)
+
+Khi `ALLOW_FULL_READ=true`, server thêm repo ảo `system` **chỉ đọc**. Dùng `repo: "system"` với đường dẫn tuyệt đối (`E:/Projects/foo/bar.ts`). Không cần khai báo từng thư mục trong `repos.json`. **Deny-list vẫn chặn** `.env`, SSH keys, `*.pem`.
+
+Bỏ trống `repo` khi `system` đang bật thì tool đọc sẽ dùng `system`.
+
+### 4.4. Chế độ toàn quyền local (`ALLOW_FULL_ACCESS`)
 
 > [!CAUTION]
 > **Cảnh báo an toàn quan trọng**: Mặc định `ALLOW_FULL_ACCESS=false` (fail-closed).
@@ -264,7 +270,7 @@ Biến môi trường `TOOL_PROFILE` trong `src/config.ts` cho phép giới hạ
 
 1. **Xác thực token timing-safe**: Mọi request tới `/mcp` đều phải có Header `Authorization: Bearer <MCP_TOKEN>`. Việc so sánh token được thực hiện bằng cách băm SHA-256 trước khi gọi `timingSafeEqual` để loại bỏ tấn công kênh thời gian (Timing Attack).
 2. **Giới hạn đường dẫn theo repository (Path confinement)**: Đường dẫn tệp được phân giải (`safeResolve`) và xác minh nằm trong thư mục gốc của repository tương ứng. Hệ thống tự động từ chối đường dẫn tuyệt đối, path traversal (`../`) và symlink trỏ ra ngoài repo.
-3. **Danh sách cấm (Deny-List)**: Chặn thao tác đọc/ghi tới `.env` (trừ các file mẫu như `.env.example`), `.git/config`, `.git/hooks/`, SSH keys, private keys (`.pem`, `.key`, `.pfx`), file chứa thông tin nhạy cảm (`secrets/`). *(Lưu ý: Deny-List bị bỏ qua nếu bật `ALLOW_FULL_ACCESS=true`)*.
+3. **Danh sách cấm (Deny-List)**: Chặn thao tác đọc/ghi tới `.env` (trừ các file mẫu như `.env.example`), `.git/config`, `.git/hooks/`, SSH keys, private keys (`.pem`, `.key`, `.pfx`), file chứa thông tin nhạy cảm (`secrets/`). *(Lưu ý: Deny-List bị bỏ qua nếu bật `ALLOW_FULL_ACCESS=true`. `ALLOW_FULL_READ` vẫn giữ Deny-List.)*.
 4. **Bảo vệ Git branch (Branch Guard)**: Thao tác ghi/commit chỉ được phép thực hiện trên các branch có tên bắt đầu bằng `branchPrefix` được cấu hình cho repo (mặc định `agent/`), hoặc trên mọi branch khi `branchPrefix` được cấu hình là `""` hoặc `"*"`.
 5. **Ghi tệp nguyên tử và bảo toàn định dạng**: Thực hiện I/O qua UTF-8 strict (`fatal: true`), loại bỏ ký tự NUL, ghi qua file tạm `.tmp` rồi đổi tên nguyên tử (atomic rename). Bảo toàn ký tự dòng kết thúc (CRLF/LF), ký tự BOM và phân quyền tệp.
 6. **Xác minh hash chống trạng thái cũ / xung đột ghi đồng thời (Stale-write guard / Optimistic concurrency)**: Hỗ trợ kiểm tra `expected_sha256` hoặc `expected_head_sha` trước khi sửa tệp/patch. Nếu tệp bị sửa đổi song song, lệnh sẽ bị từ chối mà không làm lộ nội dung thực tế.
@@ -282,7 +288,8 @@ Biến môi trường `TOOL_PROFILE` trong `src/config.ts` cho phép giới hạ
 | `REPOS_CONFIG` | `repos.json` | Đường dẫn tệp cấu hình danh sách repository. |
 | `WORKSPACE_ROOT` | *(Không)* | Thư mục cha chứa nhiều repo để tự động nhận diện. |
 | `AUTO_DISCOVERED_WRITE` | `false` | Cho phép ghi đối với repo tự động phát hiện. |
-| `ALLOW_FULL_ACCESS` | `false` | Bật repo ảo `system` (bỏ qua path confinement & Deny-List). |
+| `ALLOW_FULL_READ` | `false` | Bật repo ảo `system` chỉ đọc (đường dẫn tuyệt đối; deny-list vẫn áp dụng). |
+| `ALLOW_FULL_ACCESS` | `false` | Bật repo ảo `system` kèm ghi, bỏ qua path confinement & Deny-List. |
 | `DEFAULT_BRANCH_PREFIX` | `agent/` | Prefix branch mặc định cho phép ghi (đặt `*` cho mọi branch). |
 | `ALLOW_PUSH` | `false` | Bật/tắt công cụ `git_push`. |
 | `GIT_REMOTE` | `origin` | Tên Git remote mặc định. |

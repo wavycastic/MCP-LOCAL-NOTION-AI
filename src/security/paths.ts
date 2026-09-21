@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { ALLOW_FULL_ACCESS } from "../config.js"
 
 export const FULL_ACCESS_ROOT = "__FULL_ACCESS__"
 
@@ -46,7 +47,12 @@ function resolveInRoot(root: string, rel: string): string {
 	if (typeof rel !== "string" || rel.length === 0)
 		throw new PathDenied("path required")
 	if (rel.includes("\0")) throw new PathDenied("invalid path")
-	if (root === FULL_ACCESS_ROOT) return isAbsolute(rel) ? resolve(rel) : resolve(process.cwd(), rel)
+	if (root === FULL_ACCESS_ROOT) {
+		const abs = isAbsolute(rel) ? resolve(rel) : resolve(process.cwd(), rel)
+		// Chi ALLOW_FULL_ACCESS moi tat deny-list. ALLOW_FULL_READ van chan secret.
+		if (!ALLOW_FULL_ACCESS && isDeniedRelPath(abs)) throw new PathDenied(`denied path: ${rel}`)
+		return abs
+	}
 	if (isAbsolute(rel)) throw new PathDenied("path must be relative to repo root")
 
 	const target = resolve(root, rel)

@@ -136,8 +136,8 @@ type ToolDef = { name: string; desc: string; schema: any; fn: Handler; opts?: Op
  * con — giam ap luc GC tren duong nong.
  */
 const TOOL_DEFS: ToolDef[] = [
-	{ name: "list_repos", desc: "Liet ke cac repo dang phuc vu (ten, quyen ghi, toolchain). Goi dau tien khi chua biet ten repo — moi tool khac nhan tham so `repo` tu day.", schema: { refresh: z.boolean().optional().describe("Bo qua cache 10s, quet lai") }, fn: listRepos, opts: { readOnly: true } },
-	{ name: "read_file", desc: "Doc 1 file khi DA BIET chinh xac duong dan. Phan trang theo dong.", schema: readFileSchema, fn: readFile, opts: { readOnly: true } },
+	{ name: "list_repos", desc: "Liet ke cac repo dang phuc vu (ten, quyen ghi, toolchain). Goi dau tien khi chua biet ten repo — moi tool khac nhan tham so `repo` tu day. Neu co repo `system` (ALLOW_FULL_READ): dung no de doc duong dan tuyet doi tren may.", schema: { refresh: z.boolean().optional().describe("Bo qua cache 10s, quet lai") }, fn: listRepos, opts: { readOnly: true } },
+	{ name: "read_file", desc: "Doc 1 file khi DA BIET chinh xac duong dan. Phan trang theo dong. Khi repo=system: `path` la duong dan tuyet doi (vd E:/Projects/foo/bar.ts).", schema: readFileSchema, fn: readFile, opts: { readOnly: true } },
 	{ name: "read_many_files", desc: "Doc 1-50 file trong 1 call de giam round-trip.", schema: readManyFilesSchema, fn: readManyFiles, opts: { readOnly: true } },
 	{ name: "list_dir", desc: "Liet ke file/thu muc (bo qua node_modules, bin, obj, dist, .git).", schema: listDirSchema, fn: listDir, opts: { readOnly: true } },
 	{ name: "glob_files", desc: "Tim duong dan file theo glob pattern (vd: **/*.ts, src/**/*.json).", schema: globFilesSchema, fn: globFiles, opts: { readOnly: true } },

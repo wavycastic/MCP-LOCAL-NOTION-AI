@@ -91,6 +91,15 @@ export const AUTO_DISCOVERED_WRITE = bool("AUTO_DISCOVERED_WRITE", false)
  */
 export const ALLOW_FULL_ACCESS = bool("ALLOW_FULL_ACCESS", false)
 
+/**
+ * Repo ao "system" chi-doc: doc duong dan tuyet doi tren may.
+ * Deny-list van ap dung (.env, SSH keys, *.pem). ALLOW_FULL_ACCESS ke thua
+ * quyen nay roi moi mo ghi va tat deny-list.
+ *
+ * Mac dinh FALSE (fail-closed). Dat ALLOW_FULL_READ=true de mo.
+ */
+export const ALLOW_FULL_READ = bool("ALLOW_FULL_READ", false) || ALLOW_FULL_ACCESS
+
 /** Prefix branch cho phep ghi, dung khi repo khong khai bao rieng. */
 export const DEFAULT_BRANCH_PREFIX = process.env.DEFAULT_BRANCH_PREFIX ?? "agent/"
 

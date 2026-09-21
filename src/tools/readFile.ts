@@ -6,8 +6,8 @@ import { resolveRepo } from "../repos.js"
 import { safeResolve } from "../security/paths.js"
 
 export const readFileSchema = {
-	repo: z.string().optional().describe("Ten repo (xem list_repos)"),
-	path: z.string(),
+	repo: z.string().optional().describe("Ten repo (xem list_repos). Bo trong / dat system de doc duong dan tuyet doi khi ALLOW_FULL_READ"),
+	path: z.string().describe("Duong dan tuong doi so voi repo root. Khi repo=system: duong dan tuyet doi tren may"),
 	line_start: z.number().int().min(1).optional(),
 	line_end: z.number().int().min(1).optional(),
 }

@@ -16,3 +16,7 @@ release/
 cloudflared.exe
 cloudflared
 
+# Thu muc nhap / file tam tren may nay, khong dua len GitHub.
+scratch/
+__locktest.tmp
+

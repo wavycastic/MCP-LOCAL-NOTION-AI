@@ -3,11 +3,13 @@ import { basename, join } from "node:path"
 import {
 	AUTO_DISCOVERED_WRITE,
 	ALLOW_FULL_ACCESS,
+	ALLOW_FULL_READ,
 	DEFAULT_BRANCH_PREFIX,
 	REPOS_CONFIG,
 	WORKSPACE_ROOT,
 } from "./config.js"
 import { detectToolchain } from "./toolchain.js"
+import { FULL_ACCESS_ROOT } from "./security/paths.js"
 
 export type Repo = {
 	name: string
@@ -137,11 +139,11 @@ export function allRepos(): Repo[] {
 		}
 	}
 
-	if (ALLOW_FULL_ACCESS) {
+	if (ALLOW_FULL_READ) {
 		byRoot.set("__system__", {
 			name: "system",
-			root: "__FULL_ACCESS__",
-			write: true,
+			root: FULL_ACCESS_ROOT,
+			write: ALLOW_FULL_ACCESS,
 			branchPrefix: "*",
 			toolchain: "system",
 			source: "system",
@@ -212,9 +214,12 @@ export function resolveRepo(name?: string): Repo {
 
 /** Chan ghi vao repo chi-doc (mac dinh cua moi repo). */
 export function assertWritableRepo(repo: Repo): void {
-	if (repo.source === "system") return
-	if (!repo.write)
+	if (repo.write) return
+	if (repo.source === "system")
 		throw new RepoError(
-			`repo "${repo.name}" la chi-doc. Dat "write": true cho no trong ${REPOS_CONFIG} neu muon cho ghi`,
+			`repo "system" la chi-doc (ALLOW_FULL_READ). Dat ALLOW_FULL_ACCESS=true neu muon ghi ra ngoai repo da khai bao`,
 		)
+	throw new RepoError(
+		`repo "${repo.name}" la chi-doc. Dat "write": true cho no trong ${REPOS_CONFIG} neu muon cho ghi`,
+	)
 }

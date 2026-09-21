@@ -45,6 +45,8 @@ Moi tool bat dau bang `resolveRepo(a.repo)`. Khong tool nao duoc gia dinh "repo 
    `repo.write` va branch prefix. Khong co ngoai le.
 8. **Repo mac dinh la chi-doc.** Repo tu dong tim thay chi ghi duoc khi `AUTO_DISCOVERED_WRITE=true`;
    repo trong `repos.json` chi ghi duoc khi `"write": true`. Dung doi mac dinh nay.
+   `ALLOW_FULL_READ` them repo ao `system` chi-doc (duong dan tuyet doi, deny-list van ap dung).
+   Chi `ALLOW_FULL_ACCESS` moi mo ghi + tat deny-list. Mac dinh ca hai la false.
 9. **Khong them `git reset --hard`, `git checkout -- .`, `git clean`, `git push --force`.**
    Local la nguon su that; cac lenh nay xoa dung thu agent vua viet.
    Ngoai le duy nhat da can nhac: `git_restore` chay `git checkout HEAD -- <cac file cu the>`.

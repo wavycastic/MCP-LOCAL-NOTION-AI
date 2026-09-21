@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { allRepos, type Repo } from "./repos.js"
-import { REPOS_CONFIG, ALLOW_FULL_ACCESS, ALLOW_TERMINAL } from "./config.js"
+import { REPOS_CONFIG, ALLOW_FULL_ACCESS, ALLOW_FULL_READ, ALLOW_TERMINAL } from "./config.js"
 
 // ---------------------------------------------------------------------------
 // Health (liveness)
@@ -50,6 +50,7 @@ export type ReadinessResult = {
 	repos: RepoReadiness[]
 	security: {
 		allowFullAccess: boolean
+		allowFullRead: boolean
 		allowTerminal: boolean
 	}
 	errors: string[]
@@ -94,6 +95,7 @@ export async function checkReadiness(): Promise<ReadinessResult> {
 		repos: repoReadiness,
 		security: {
 			allowFullAccess: ALLOW_FULL_ACCESS,
+			allowFullRead: ALLOW_FULL_READ,
 			allowTerminal: ALLOW_TERMINAL,
 		},
 		errors,

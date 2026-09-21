@@ -68,13 +68,15 @@ process.env.WORKSPACE_ROOT = workspace
 process.env.REPOS_CONFIG = reposConfig
 process.env.ALLOW_PUSH = "false"
 process.env.ALLOW_TERMINAL = "true"
-// Smoke kiem tra sandbox theo repo; tat repo ao `system` cua che do Full Access.
+// Smoke kiem tra sandbox theo repo; tat repo ao `system` cua che do Full Access/Read.
 process.env.ALLOW_FULL_ACCESS = "false"
+process.env.ALLOW_FULL_READ = "false"
 process.env.AUTO_DISCOVERED_WRITE = "false"
 process.env.MAX_READ_BYTES = "5000" // ha tran cho de test, moi file thuc te deu nho hon
 process.env.MAX_WRITE_BYTES = "5000"
 
-const { allRepos, invalidateRepoCache } = await import("../src/repos.js")
+const { allRepos, invalidateRepoCache, assertWritableRepo } = await import("../src/repos.js")
+const { FULL_ACCESS_ROOT, safeResolve } = await import("../src/security/paths.js")
 const { redactForAudit } = await import("../src/log.js")
 const { buildTerminalEnv } = await import("../src/exec.js")
 const { listRepos } = await import("../src/tools/listRepos.js")
@@ -1100,6 +1102,48 @@ try {
 writeFileSync(reposConfig, goodConfig)
 invalidateRepoCache()
 ok("khoi phuc duoc sau khi sua config", allRepos().length === 2)
+
+console.log("\nfull read paths")
+const absReadme = join(rw, "README.md")
+ok(
+	"FULL_ACCESS_ROOT resolve duong dan tuyet doi",
+	safeResolve(FULL_ACCESS_ROOT, absReadme).toLowerCase().replaceAll("\\", "/").endsWith("/readme.md"),
+)
+try {
+	safeResolve(FULL_ACCESS_ROOT, join(rw, ".env"))
+	fail++
+	console.error("  FAIL  FULL_ACCESS_ROOT phai chan .env khi khong ALLOW_FULL_ACCESS")
+} catch (e) {
+	ok("FULL_ACCESS_ROOT giu deny-list khi chi doc", String(e).includes("denied"), String(e))
+}
+try {
+	assertWritableRepo({
+		name: "system",
+		root: FULL_ACCESS_ROOT,
+		write: false,
+		branchPrefix: "*",
+		toolchain: "system",
+		source: "system",
+	})
+	fail++
+	console.error("  FAIL  system write:false phai chan ghi")
+} catch (e) {
+	ok("system chi-doc khi ALLOW_FULL_READ", String(e).includes("chi-doc"), String(e))
+}
+try {
+	assertWritableRepo({
+		name: "system",
+		root: FULL_ACCESS_ROOT,
+		write: true,
+		branchPrefix: "*",
+		toolchain: "system",
+		source: "system",
+	})
+	ok("system ghi duoc khi write:true", true)
+} catch (e) {
+	fail++
+	console.error(`  FAIL  system write:true bi chan — ${String(e)}`)
+}
 
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail === 0 ? 0 : 1)
